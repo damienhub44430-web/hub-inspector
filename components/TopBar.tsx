@@ -1,6 +1,6 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, Play } from 'lucide-react'
+import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, Play, Share2, Check } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { parseHTMLToBlocks, makeFullPageDemo, importedToScreen } from '@/lib/blocks-library'
 
@@ -15,6 +15,8 @@ export default function TopBar() {
 
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [shareUrl, setShareUrl] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
   const [urlVal, setUrlVal] = useState('')
   const [htmlVal, setHtmlVal] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -107,6 +109,20 @@ export default function TopBar() {
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
     a.download = `${projectName.replace(/\s+/g, '-')}.html`; a.click()
+  }
+
+  // ─── Partage (lien prototype lecture seule) ──────────────────────────────
+  const share = async () => {
+    setSharing(true)
+    try {
+      const res = await fetch('/api/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectName, screens, tokens }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      const url = `${window.location.origin}/p/${data.sessionId}`
+      setShareUrl(url)
+      try { await navigator.clipboard.writeText(url) } catch {}
+    } catch (e: unknown) { setStatus('error', e instanceof Error ? e.message : 'Partage impossible') }
+    finally { setSharing(false) }
   }
 
   // ─── Import JSON ─────────────────────────────────────────────────────────
@@ -263,6 +279,26 @@ export default function TopBar() {
       <button className="btn btn-ghost" title="Mode présentation" onClick={() => setPresenting(true)}>
         <Play size={13} /> Présenter
       </button>
+
+      {/* ── Partager ── */}
+      <div style={{ position: 'relative' }}>
+        <button className="btn btn-ghost" title="Lien de prototype partageable" onClick={share} disabled={sharing}>
+          {sharing ? <Loader size={13} className="spin" /> : <Share2 size={13} />} Partager
+        </button>
+        {shareUrl && (
+          <div className="fadein" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, zIndex: 300, width: 320, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+            <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Check size={12} style={{ color: 'var(--success)' }} /> Lien copié — prototype en lecture seule
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input className="input input-sm" readOnly value={shareUrl} onFocus={e => (e.target as HTMLInputElement).select()} style={{ fontSize: 10 }} />
+              <button className="btn-icon" title="Copier" onClick={() => navigator.clipboard.writeText(shareUrl)}><Copy size={12} /></button>
+              <button className="btn-icon" title="Fermer" onClick={() => setShareUrl(null)}>✕</button>
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 7, opacity: 0.75 }}>Valable tant que le serveur reste actif (proto).</div>
+          </div>
+        )}
+      </div>
 
       <div className="divider" />
 
