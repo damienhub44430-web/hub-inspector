@@ -3,43 +3,64 @@ import { NextRequest, NextResponse } from 'next/server'
 export const maxDuration = 60
 
 const SECTION_COLORS: Record<string, string> = {
-  navbar: '#22d3a0',
-  hero: '#7c6af7',
-  features: '#60a5fa',
-  cta: '#f59e0b',
-  testimonials: '#f472b6',
-  pricing: '#34d399',
-  faq: '#a78bfa',
-  footer: '#6b7280',
-  content: '#94a3b8',
-  gallery: '#fb923c',
-  form: '#e879f9',
-  unknown: '#4b5563',
+  navbar: '#22d3a0', hero: '#7c6af7', features: '#60a5fa', cta: '#f59e0b',
+  testimonials: '#f472b6', pricing: '#34d399', faq: '#a78bfa', footer: '#6b7280',
+  content: '#94a3b8', gallery: '#fb923c', form: '#e879f9', unknown: '#4b5563',
 }
 
-// Screenshot via Microlink (renvoie une URL publique)
+// Screenshot via Microlink → renvoie l'URL publique de l'image
 async function captureScreenshot(url: string): Promise<{ imageUrl: string; width: number; height: number }> {
-  const apiUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&embed=screenshot.url&waitForTimeout=2000&fullPage=true`
-  const res = await fetch(apiUrl, { signal: AbortSignal.timeout(20000) })
-  if (!res.ok) throw new Error('Microlink screenshot failed')
-  const data = await res.json()
-  const imgUrl = data?.data?.screenshot?.url
-  if (!imgUrl) throw new Error('Pas de screenshot disponible')
+  // Sans embed= : Microlink renvoie du JSON avec metadata + URL du screenshot
+  const apiUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&waitForTimeout=2000&fullPage=true`
+  const res = await fetch(apiUrl, {
+    headers: { 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(25000),
+  })
 
-  // Récupérer dimensions depuis les metadata
-  const w = data?.data?.screenshot?.width || 1280
-  const h = data?.data?.screenshot?.height || 3000
+  const contentType = res.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    const raw = await res.text()
+    throw new Error(`Microlink a renvoyé du non-JSON: ${contentType} — ${raw.slice(0, 100)}`)
+  }
+
+  if (!res.ok) throw new Error(`Microlink erreur ${res.status}`)
+
+  const data = await res.json()
+  if (data.status === 'fail') throw new Error(data.message || 'Microlink: échec du screenshot')
+
+  const imgUrl: string = data?.data?.screenshot?.url
+  if (!imgUrl) throw new Error('Microlink: pas d\'URL screenshot dans la réponse')
+
+  const w: number = data?.data?.screenshot?.width || 1280
+  const h: number = data?.data?.screenshot?.height || 2400
 
   return { imageUrl: imgUrl, width: w, height: h }
 }
 
-// Analyser le screenshot avec Claude Vision pour détecter les sections
-async function analyzeSections(screenshotUrl: string, pageUrl: string): Promise<Array<{
-  type: string; label: string; yPercent: number; heightPercent: number; content: Record<string, unknown>
-}>> {
+// Télécharge le screenshot et le convertit en base64 pour Claude Vision
+async function imageUrlToBase64(url: string): Promise<{ base64: string; mediaType: string }> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+  if (!res.ok) throw new Error(`Impossible de télécharger l'image: ${res.status}`)
+  const buffer = await res.arrayBuffer()
+  const base64 = Buffer.from(buffer).toString('base64')
+  const mediaType = res.headers.get('content-type') || 'image/jpeg'
+  return { base64, mediaType }
+}
+
+// Analyser le screenshot avec Claude Vision
+async function analyzeSections(
+  imageBase64: string,
+  mediaType: string,
+  pageUrl: string
+): Promise<Array<{ type: string; label: string; yPercent: number; heightPercent: number; content: Record<string, unknown> }>> {
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY || '', 'anthropic-version': '2023-06-01' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+      'anthropic-version': '2023-06-01',
+    },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 2000,
@@ -48,91 +69,98 @@ async function analyzeSections(screenshotUrl: string, pageUrl: string): Promise<
         content: [
           {
             type: 'image',
-            source: { type: 'url', url: screenshotUrl },
+            source: { type: 'base64', media_type: mediaType, data: imageBase64 },
           },
           {
             type: 'text',
             text: `Analyse ce screenshot de la page web ${pageUrl}.
 
-Identifie chaque section distincte de la page (navbar, hero, features, CTA, témoignages, pricing, FAQ, footer, etc.).
+Identifie chaque section distincte (navbar, hero, features, CTA, testimonials, pricing, faq, footer, etc.).
 
-Pour chaque section, retourne UNIQUEMENT un JSON valide (rien d'autre) dans ce format exact :
+Retourne UNIQUEMENT ce JSON valide, sans markdown ni explication :
 {
   "sections": [
     {
       "type": "navbar|hero|features|cta|testimonials|pricing|faq|footer|content|gallery|form|unknown",
-      "label": "Nom humain de la section",
+      "label": "Nom court de la section",
       "yPercent": 0.0,
       "heightPercent": 0.12,
       "content": {
-        "headline": "texte du titre principal si visible",
-        "subtext": "texte secondaire si visible",
-        "cta": "texte du bouton CTA si visible",
-        "elements": ["liste", "d'éléments", "notables"]
+        "headline": "titre principal visible",
+        "subtext": "texte secondaire visible",
+        "cta": "texte du bouton CTA",
+        "elements": ["éléments", "notables"]
       }
     }
   ]
 }
 
-yPercent = position Y de début de la section (0 = haut, 1 = bas de page)
-heightPercent = hauteur de la section en fraction de la page totale
-La somme de tous les heightPercent doit faire ~1.0
-
-Retourne UNIQUEMENT le JSON, sans markdown, sans explication.`,
+Règles :
+- yPercent = position Y de début (0=haut, 1=bas)
+- heightPercent = hauteur en fraction de la page totale
+- La somme des heightPercent doit être ~1.0
+- Retourne UNIQUEMENT le JSON brut`,
           }
         ]
       }]
-    })
+    }),
+    signal: AbortSignal.timeout(30000),
   })
 
   if (!response.ok) {
     const err = await response.text()
-    throw new Error(`Claude API error: ${err}`)
+    throw new Error(`Claude API ${response.status}: ${err.slice(0, 200)}`)
   }
 
   const data = await response.json()
-  const text = data.content?.[0]?.text || ''
+  const text: string = data.content?.[0]?.text || ''
 
-  // Parser le JSON retourné par Claude
-  const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-  const parsed = JSON.parse(cleaned)
+  // Extraire le JSON même s'il y a du texte autour
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('Claude n\'a pas retourné de JSON valide')
+
+  const parsed = JSON.parse(jsonMatch[0])
   return parsed.sections || []
 }
 
 export async function POST(req: NextRequest) {
-  const { url } = await req.json()
+  const body = await req.json()
+  const { url } = body
   if (!url) return NextResponse.json({ error: 'URL requise' }, { status: 400 })
 
   let cleanUrl = url.trim()
   if (!cleanUrl.startsWith('http')) cleanUrl = `https://${cleanUrl}`
 
   try {
-    // 1. Screenshot
+    // 1. Screenshot via Microlink
     const { imageUrl, width, height } = await captureScreenshot(cleanUrl)
 
-    // 2. Analyse Claude Vision
+    // 2. Télécharger l'image et la convertir en base64
+    const { base64, mediaType } = await imageUrlToBase64(imageUrl)
+
+    // 3. Analyse Claude Vision
     let rawSections: Array<{ type: string; label: string; yPercent: number; heightPercent: number; content: Record<string, unknown> }> = []
     try {
-      rawSections = await analyzeSections(imageUrl, cleanUrl)
-    } catch {
-      // Fallback si Claude échoue : sections génériques
+      rawSections = await analyzeSections(base64, mediaType, cleanUrl)
+    } catch (e) {
+      console.error('Claude Vision fallback:', e)
+      // Fallback générique
       rawSections = [
-        { type: 'navbar', label: 'Navigation', yPercent: 0, heightPercent: 0.07, content: {} },
-        { type: 'hero', label: 'Hero', yPercent: 0.07, heightPercent: 0.3, content: {} },
-        { type: 'content', label: 'Contenu principal', yPercent: 0.37, heightPercent: 0.4, content: {} },
-        { type: 'footer', label: 'Footer', yPercent: 0.77, heightPercent: 0.23, content: {} },
+        { type: 'navbar',  label: 'Navigation',       yPercent: 0,    heightPercent: 0.07, content: {} },
+        { type: 'hero',    label: 'Hero',              yPercent: 0.07, heightPercent: 0.28, content: {} },
+        { type: 'features',label: 'Fonctionnalités',   yPercent: 0.35, heightPercent: 0.25, content: {} },
+        { type: 'cta',     label: 'Call to Action',    yPercent: 0.60, heightPercent: 0.15, content: {} },
+        { type: 'footer',  label: 'Footer',            yPercent: 0.75, heightPercent: 0.25, content: {} },
       ]
     }
 
-    // 3. Construire les sections avec positions canvas
-    const CANVAS_W = 900 // largeur d'affichage dans le canvas
+    // 4. Construire les sections avec positions canvas
+    const CANVAS_W = 900
     const scale = CANVAS_W / width
-    const canvasHeight = height * scale
 
     const sections = rawSections.map((s, i) => {
       const srcY = Math.round(s.yPercent * height)
       const srcH = Math.round(s.heightPercent * height)
-
       return {
         id: `section-${i}`,
         type: s.type,
@@ -140,17 +168,15 @@ export async function POST(req: NextRequest) {
         srcY,
         srcHeight: srcH,
         srcWidth: width,
-        // Position initiale : empilées verticalement
         x: 0,
         y: Math.round(srcY * scale),
         width: CANVAS_W,
-        height: Math.round(srcH * scale),
-        imageUrl: `${imageUrl}#section-${i}`, // même image, on clippe via CSS
+        height: Math.max(40, Math.round(srcH * scale)),
+        imageUrl,          // URL publique Microlink
         content: s.content || {},
         color: SECTION_COLORS[s.type] || SECTION_COLORS.unknown,
         locked: false,
         visible: true,
-        // On stocke aussi les ratios pour le clipping
         clipY: s.yPercent,
         clipH: s.heightPercent,
       }
@@ -167,6 +193,7 @@ export async function POST(req: NextRequest) {
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Erreur inconnue'
+    console.error('inspect error:', msg)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
