@@ -1,0 +1,6 @@
+{
+  "functions": {
+    "app/api/inspect/route.ts": { "maxDuration": 60 },
+    "app/api/claude/route.ts": { "maxDuration": 30 }
+  }
+}
