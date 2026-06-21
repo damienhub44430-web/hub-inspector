@@ -143,10 +143,12 @@ export default function Canvas() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { deleteSelected, duplicateSelected, selectAll, selectedIds: sids, zoom: z, setZoom: sz, undo, redo, presenting } = useStore.getState()
+      const { deleteSelected, duplicateSelected, selectAll, selectedIds: sids, zoom: z, setZoom: sz, undo, redo, presenting, groupSelected, ungroupSelected } = useStore.getState()
       const k = e.key.toLowerCase()
       if (presenting) return
       if (['INPUT','TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return
+      if ((e.ctrlKey || e.metaKey) && k === 'g' && e.shiftKey) { e.preventDefault(); ungroupSelected(); return }
+      if ((e.ctrlKey || e.metaKey) && k === 'g') { e.preventDefault(); groupSelected(); return }
       if ((e.ctrlKey || e.metaKey) && k === 'z' && e.shiftKey) { e.preventDefault(); redo(); return }
       if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undo(); return }
       if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return }

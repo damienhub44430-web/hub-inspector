@@ -8,9 +8,13 @@ import type { Block, LeftTab } from '@/lib/types'
 
 // ─── Panel Calques ────────────────────────────────────────────────────────
 
+// Bloc en cours de glissement (partagé entre les lignes)
+let draggedLayerId: string | null = null
+
 function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
-  const { selectedIds, select, updateBlock, pushHistory } = useStore()
+  const { selectedIds, select, updateBlock, pushHistory, reorderSiblings } = useStore()
   const [open, setOpen] = useState(true)
+  const [dragOver, setDragOver] = useState(false)
   const isSel = selectedIds.includes(block.id)
   const hasChildren = (block.children?.length || 0) > 0
   const isInstance = !!block.componentId
@@ -33,13 +37,19 @@ function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
     <div>
       <div
         onClick={() => select(block.id, false)}
+        draggable
+        onDragStart={e => { e.stopPropagation(); draggedLayerId = block.id; e.dataTransfer.effectAllowed = 'move' }}
+        onDragOver={e => { e.preventDefault(); if (draggedLayerId && draggedLayerId !== block.id) setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); e.stopPropagation(); setDragOver(false); if (draggedLayerId && draggedLayerId !== block.id) reorderSiblings(draggedLayerId, block.id); draggedLayerId = null }}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: `5px 8px 5px ${8 + depth * 14}px`,
           cursor: 'pointer', borderRadius: 5, margin: '1px 4px',
           background: isSel ? `${color}18` : 'transparent',
           border: `1px solid ${isSel ? color + '44' : 'transparent'}`,
-          transition: 'all 0.1s',
+          borderTop: dragOver ? '2px solid var(--accent)' : undefined,
+          transition: 'background 0.1s',
         }}
         onMouseEnter={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = 'var(--card)' }}
         onMouseLeave={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = 'transparent' }}

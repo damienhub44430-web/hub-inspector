@@ -145,6 +145,11 @@ interface AppState {
   // ── Alignement ──
   alignBlocks: (axis: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => void
 
+  // ── Hiérarchie ──
+  reorderSiblings: (draggedId: string, targetId: string) => void
+  groupSelected: () => void
+  ungroupSelected: () => void
+
   // ── Design tokens ──
   addColorToken: (name: string, value: string) => void
   updateColorToken: (id: string, changes: Partial<ColorToken>) => void
@@ -562,6 +567,72 @@ export const useStore = create<AppState>()((set, get) => ({
           default: return b
         }
       }))
+    })
+  },
+
+  // ── Hiérarchie ──
+  reorderSiblings: (draggedId, targetId) => {
+    if (draggedId === targetId) return
+    const blocks = currentBlocks(get())
+    const di = blocks.findIndex(b => b.id === draggedId)
+    const ti = blocks.findIndex(b => b.id === targetId)
+    if (di >= 0 && ti >= 0) {
+      // Réordonnancement au niveau racine (ordre Z)
+      get().pushHistory()
+      set(st => patchScreens(st, bs => {
+        const arr = [...bs]
+        const [m] = arr.splice(arr.findIndex(b => b.id === draggedId), 1)
+        arr.splice(arr.findIndex(b => b.id === targetId), 0, m)
+        return arr
+      }))
+      return
+    }
+    // Réordonnancement à l'intérieur d'un même parent
+    const parent = blocks.find(b => b.children?.some(c => c.id === draggedId) && b.children?.some(c => c.id === targetId))
+    if (!parent) return
+    get().pushHistory()
+    set(st => patchScreens(st, bs => bs.map(b => {
+      if (b.id !== parent.id) return b
+      const arr = [...(b.children || [])]
+      const [m] = arr.splice(arr.findIndex(c => c.id === draggedId), 1)
+      arr.splice(arr.findIndex(c => c.id === targetId), 0, m)
+      return { ...b, children: arr }
+    })))
+  },
+
+  groupSelected: () => {
+    const s = get()
+    const blocks = currentBlocks(s)
+    const sel = blocks.filter(b => s.selectedIds.includes(b.id))
+    if (sel.length < 2) return
+    get().pushHistory()
+    const minX = Math.min(...sel.map(b => b.x)), minY = Math.min(...sel.map(b => b.y))
+    const maxX = Math.max(...sel.map(b => b.x + b.width)), maxY = Math.max(...sel.map(b => b.y + b.height))
+    const group: Block = {
+      id: rid('b'), kind: 'section', x: minX, y: minY, width: maxX - minX, height: maxY - minY,
+      style: {}, visible: true, locked: false,
+      children: sel.map(b => ({ ...b, x: b.x - minX, y: b.y - minY })),
+    }
+    set(st => ({ ...patchScreens(st, bs => [...bs.filter(b => !st.selectedIds.includes(b.id)), group]), selectedIds: [group.id] }))
+  },
+
+  ungroupSelected: () => {
+    const s = get()
+    const hasGroup = currentBlocks(s).some(b => s.selectedIds.includes(b.id) && b.children?.length)
+    if (!hasGroup) return
+    get().pushHistory()
+    set(st => {
+      const newSel: string[] = []
+      const out: Block[] = []
+      for (const b of currentBlocks(st)) {
+        if (st.selectedIds.includes(b.id) && b.children?.length) {
+          for (const c of b.children) {
+            const promoted = { ...c, x: b.x + c.x, y: b.y + c.y }
+            out.push(promoted); newSel.push(promoted.id)
+          }
+        } else out.push(b)
+      }
+      return { ...patchScreens(st, () => out), selectedIds: newSel }
     })
   },
 

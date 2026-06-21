@@ -1,12 +1,13 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, Play, Share2, Check } from 'lucide-react'
+import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, Play, Share2, Check, Group, Ungroup } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { parseHTMLToBlocks, makeFullPageDemo, importedToScreen } from '@/lib/blocks-library'
 
 export default function TopBar() {
   const { projectName, setProjectName, screens, currentScreenId, tokens, components, selectedIds, zoom, setZoom, setPan,
     zoomToFit, newProject, deleteSelected, duplicateSelected, alignBlocks,
+    groupSelected, ungroupSelected,
     addBlocks, addScreenWithBlocks, loadProject, undo, redo, past, future,
     goToDashboard, setPresenting,
     setStatus, status, error, importMode, setImportMode } = useStore()
@@ -245,13 +246,15 @@ export default function TopBar() {
       {/* ── Outils sélection ── */}
       {hasSel && (
         <>
-          <button className="btn-icon" title="Dupliquer" onClick={duplicateSelected}><Copy size={13}/></button>
+          <button className="btn-icon" title="Dupliquer (Ctrl+D)" onClick={duplicateSelected}><Copy size={13}/></button>
+          <button className="btn-icon" title="Dégrouper (Ctrl+Shift+G)" onClick={ungroupSelected}><Ungroup size={13}/></button>
           <button className="btn-icon" title="Supprimer" onClick={deleteSelected} style={{ color: 'var(--error)' }}><Trash2 size={13}/></button>
           <div className="divider" />
         </>
       )}
       {hasMulti && (
         <>
+          <button className="btn-icon" title="Grouper (Ctrl+G)" onClick={groupSelected}><Group size={13}/></button>
           {[
             ['left', <AlignLeft size={13}/>,'Aligner à gauche'],
             ['center', <AlignCenter size={13}/>,'Centrer horizontalement'],
