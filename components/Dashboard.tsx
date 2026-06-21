@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Sparkles, Plus, Copy, Trash2, Pencil, Layout } from 'lucide-react'
+import { Sparkles, Plus, Copy, Trash2, Pencil, Layout, Search } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { loadDoc } from '@/lib/storage'
 import type { Block, Screen } from '@/lib/types'
@@ -50,8 +50,15 @@ export default function Dashboard() {
   const { projects, projectId, createProject, openProject, deleteProject, duplicateProject, renameProject, openEditor } = useStore()
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<'recent' | 'name'>('recent')
 
   const commit = () => { if (editing && draft.trim()) renameProject(editing, draft.trim()); setEditing(null) }
+
+  const q = query.trim().toLowerCase()
+  const filtered = projects
+    .filter(p => !q || p.name.toLowerCase().includes(q))
+    .sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : b.updatedAt - a.updatedAt)
 
   return (
     <div style={{ height: '100vh', overflowY: 'auto', background: 'var(--bg)' }}>
@@ -66,14 +73,28 @@ export default function Dashboard() {
         <button className="btn btn-primary" onClick={() => createProject()}><Plus size={14} /> Nouveau projet</button>
       </div>
 
+      {/* Barre recherche / tri */}
+      <div style={{ padding: '14px 28px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
+          <input className="input" style={{ paddingLeft: 30 }} placeholder="Rechercher un projet…" value={query} onChange={e => setQuery(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: 2, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 7, padding: 2 }}>
+          {([['recent', 'Récents'], ['name', 'A→Z']] as const).map(([k, lbl]) => (
+            <button key={k} onClick={() => setSort(k)} className="tab" style={{ background: sort === k ? 'var(--card2)' : 'transparent', color: sort === k ? 'var(--text)' : 'var(--muted)' }}>{lbl}</button>
+          ))}
+        </div>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{filtered.length} / {projects.length}</span>
+      </div>
+
       {/* Grille */}
       <div style={{ padding: 28, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 18 }}>
-        {projects.length === 0 && (
+        {filtered.length === 0 && (
           <div style={{ color: 'var(--muted)', fontSize: 13, gridColumn: '1 / -1', textAlign: 'center', padding: 60 }}>
-            Aucun projet. Crée ton premier projet.
+            {q ? `Aucun projet ne correspond à « ${query} ».` : 'Aucun projet. Crée ton premier projet.'}
           </div>
         )}
-        {projects.map(p => {
+        {filtered.map(p => {
           const doc = loadDoc(p.id)
           const screen = doc?.screens?.[0]
           const active = p.id === projectId
