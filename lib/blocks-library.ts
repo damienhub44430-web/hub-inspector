@@ -287,6 +287,69 @@ export function makeFullPageDemo(): Block[] {
   return [makeNavbar(), makeHero(), makeFeatures(), makeCTA(), makeFooter()]
 }
 
+// ─── Import URL : sections extraites → blocs éditables ─────────────────────
+
+interface ImportedStyles { bgColor?: string; color?: string; fontSize?: number; fontWeight?: string }
+interface ImportedBlock { tag: string; type: string; text?: string; src?: string; x: number; y: number; width: number; height: number; styles?: ImportedStyles }
+interface ImportedSection { type: string; background?: string; y: number; width: number; height: number; blocks?: ImportedBlock[] }
+
+// Nettoie une couleur : ignore transparent / rgba(...,0) / vide
+function cleanColor(c?: string): string | undefined {
+  if (!c) return undefined
+  const t = c.trim().toLowerCase()
+  if (t === 'transparent' || t === 'none' || /rgba?\([^)]*,\s*0\s*\)$/.test(t)) return undefined
+  return c
+}
+
+const IMPORT_KIND: Record<string, BlockKind> = {
+  heading: 'heading', text: 'text', cta: 'button', image: 'image',
+  navbar: 'section', footer: 'footer', section: 'section', form: 'form', unknown: 'text',
+}
+
+function importedChildToBlock(b: ImportedBlock): Block {
+  const kind = IMPORT_KIND[b.type] || 'text'
+  const st = b.styles || {}
+  const color = cleanColor(st.color)
+  const base: Block = {
+    id: uid(), kind, x: Math.round(b.x), y: Math.round(b.y),
+    width: Math.max(8, Math.round(b.width)), height: Math.max(8, Math.round(b.height)),
+    style: {}, visible: true, locked: false,
+  }
+  if (kind === 'image') {
+    base.src = b.src || ''; base.alt = b.text || ''
+    base.style = { borderRadius: 6, backgroundColor: '#1a1a26' }
+  } else if (kind === 'button') {
+    base.text = b.text || 'Bouton'
+    base.style = { fontSize: st.fontSize || 14, fontWeight: st.fontWeight || '600', color: color || '#ffffff', backgroundColor: cleanColor(st.bgColor) || '#7c6af7', borderRadius: 8, textAlign: 'center' }
+  } else if (kind === 'heading') {
+    const fs = st.fontSize || 24
+    base.text = b.text || ''
+    base.level = fs >= 34 ? 1 : fs >= 24 ? 2 : 3
+    base.style = { fontSize: fs, fontWeight: st.fontWeight || '700', color: color || '#e2e2f0', lineHeight: 1.2 }
+  } else {
+    base.text = b.text || ''
+    base.style = { fontSize: st.fontSize || 15, fontWeight: st.fontWeight || '400', color: color || '#9494b0', lineHeight: 1.5, backgroundColor: cleanColor(st.bgColor) }
+  }
+  return base
+}
+
+function importedSectionToBlock(s: ImportedSection): Block {
+  return {
+    id: uid(), kind: 'section', x: 0, y: Math.round(s.y || 0),
+    width: Math.round(s.width || 960), height: Math.max(40, Math.round(s.height || 120)),
+    style: { backgroundColor: cleanColor(s.background) },
+    visible: true, locked: false,
+    children: (s.blocks || []).map(importedChildToBlock),
+  }
+}
+
+export function importedToScreen(sections: ImportedSection[]): { blocks: Block[]; width: number; height: number } {
+  const blocks = sections.map(importedSectionToBlock)
+  const width = sections.length ? Math.max(960, ...sections.map(s => Math.round(s.width || 960))) : 1000
+  const height = sections.length ? Math.max(...sections.map(s => Math.round((s.y || 0) + (s.height || 0)))) + 40 : 800
+  return { blocks, width, height }
+}
+
 // ─── Parse HTML → blocs ──────────────────────────────────────────────────
 
 export function parseHTMLToBlocks(html: string): Block[] {

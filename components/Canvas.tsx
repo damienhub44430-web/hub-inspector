@@ -99,11 +99,12 @@ const HANDLES = [
 // ─── Canvas principal ─────────────────────────────────────────────────────
 export default function Canvas() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { screens, currentScreenId, selectedIds, editingId, zoom, panX, panY,
+  const { screens, currentScreenId, tokens, selectedIds, editingId, zoom, panX, panY,
     select, clearSelection, setEditing, setZoom, setPan,
     updateBlock } = useStore()
   const screen = screens.find(s => s.id === currentScreenId)
   const blocks = screen?.blocks ?? []
+  const tokenVars = Object.fromEntries(tokens.colors.map(c => [`--tok-${c.id}`, c.value])) as React.CSSProperties
 
   const dragRef = useRef<{
     type: 'move' | 'resize'
@@ -139,8 +140,9 @@ export default function Canvas() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { deleteSelected, duplicateSelected, selectAll, selectedIds: sids, zoom: z, setZoom: sz, undo, redo } = useStore.getState()
+      const { deleteSelected, duplicateSelected, selectAll, selectedIds: sids, zoom: z, setZoom: sz, undo, redo, presenting } = useStore.getState()
       const k = e.key.toLowerCase()
+      if (presenting) return
       if (['INPUT','TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return
       if ((e.ctrlKey || e.metaKey) && k === 'z' && e.shiftKey) { e.preventDefault(); redo(); return }
       if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undo(); return }
@@ -389,7 +391,7 @@ export default function Canvas() {
       {/* Monde canvas */}
       <div
         id="canvas-world"
-        style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${panX}px,${panY}px) scale(${zoom})` }}
+        style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${panX}px,${panY}px) scale(${zoom})`, ...tokenVars }}
       >
         {/* Frame de l'écran courant (artboard) */}
         {screen && (

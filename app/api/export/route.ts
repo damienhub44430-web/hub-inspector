@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { Block, BlockStyle } from '@/lib/types'
+import type { Block, BlockStyle, DesignTokens } from '@/lib/types'
 
 function styleToCSS(s: BlockStyle): string {
   const props: string[] = []
@@ -42,9 +42,12 @@ function blockToHTML(b: Block, offsetX = 0, offsetY = 0): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { blocks, projectName } = await req.json()
-  
+  const { blocks, projectName, tokens, background } = await req.json() as
+    { blocks: Block[]; projectName?: string; tokens?: DesignTokens; background?: string }
+
   if (!blocks?.length) return NextResponse.json({ html: '<html><body></body></html>' })
+
+  const tokenVars = (tokens?.colors || []).map(c => `    --tok-${c.id}: ${c.value};`).join('\n')
 
   // Calculer les bounds
   const allX = blocks.map((b: Block) => b.x)
@@ -65,8 +68,11 @@ export async function POST(req: NextRequest) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
+    :root {
+${tokenVars}
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; background: ${background || '#ffffff'}; }
     .canvas { position: relative; width: ${maxW - minX}px; min-height: ${maxH - minY}px; margin: 0 auto; }
   </style>
 </head>

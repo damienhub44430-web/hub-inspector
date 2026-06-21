@@ -1,9 +1,10 @@
 'use client'
 import { useState } from 'react'
-import { Eye, EyeOff, Lock, Unlock, ChevronRight, ChevronDown, Layers, BookOpen, Trash2, Copy } from 'lucide-react'
+import { Eye, EyeOff, Lock, Unlock, ChevronRight, ChevronDown, Layers, BookOpen, Palette, Trash2, Copy } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { LIBRARY } from '@/lib/blocks-library'
-import type { Block } from '@/lib/types'
+import DesignPanel from './DesignPanel'
+import type { Block, LeftTab } from '@/lib/types'
 
 // ─── Panel Calques ────────────────────────────────────────────────────────
 
@@ -130,10 +131,14 @@ export default function LibraryPanel() {
   return (
     <div className="panel" style={{ width: 220 }}>
       {/* Tabs */}
-      <div className="panel-header" style={{ gap: 4 }}>
-        {(['layers', 'library'] as const).map(tab => (
-          <button key={tab} className={`tab ${leftTab === tab ? 'active' : ''}`} onClick={() => setLeftTab(tab)}>
-            {tab === 'layers' ? <><Layers size={11}/> Calques</> : <><BookOpen size={11}/> Blocs</>}
+      <div className="panel-header" style={{ gap: 2 }}>
+        {([
+          ['layers', <Layers key="l" size={11} />, 'Calques'],
+          ['library', <BookOpen key="b" size={11} />, 'Blocs'],
+          ['design', <Palette key="d" size={11} />, 'Design'],
+        ] as [LeftTab, React.ReactNode, string][]).map(([tab, icon, label]) => (
+          <button key={tab} className={`tab ${leftTab === tab ? 'active' : ''}`} onClick={() => setLeftTab(tab)} style={{ padding: '4px 8px' }}>
+            {icon} {label}
           </button>
         ))}
         {leftTab === 'layers' && selectedIds.length > 0 && (
@@ -145,7 +150,9 @@ export default function LibraryPanel() {
         )}
       </div>
 
-      {leftTab === 'layers' ? (
+      {leftTab === 'design' ? (
+        <DesignPanel />
+      ) : leftTab === 'layers' ? (
         <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
           <style>{`.layer-actions { opacity: 0 } *:hover > .layer-actions { opacity: 1 }`}</style>
           {!blocks.length ? (

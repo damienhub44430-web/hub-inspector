@@ -2,21 +2,37 @@
 import { useState, useRef } from 'react'
 import { Sparkles, Loader, Send, Copy, RotateCcw, Wand2, Type, Layout, Zap, Link, AlignLeft, AlignCenter, AlignRight } from 'lucide-react'
 import { useStore } from '@/lib/store'
-import type { Block, BlockStyle } from '@/lib/types'
+import type { Block, BlockStyle, ColorToken } from '@/lib/types'
 
 // ─── Composants de style ──────────────────────────────────────────────────
 
-function ColorInput({ label, value, onChange }: { label: string; value?: string; onChange: (v: string) => void }) {
+function resolveColor(val: string, tokens?: ColorToken[]): string {
+  const m = /^var\(--tok-(.+)\)$/.exec(val)
+  if (m && tokens) return tokens.find(t => t.id === m[1])?.value || val
+  return val
+}
+
+function ColorInput({ label, value, onChange, tokens }: { label: string; value?: string; onChange: (v: string) => void; tokens?: ColorToken[] }) {
   const ref = useRef<HTMLInputElement>(null)
   const val = value || ''
+  const resolved = resolveColor(val, tokens)
   return (
     <div>
       <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <div className="color-swatch" style={{ background: val || 'transparent' }} onClick={() => ref.current?.click()} />
-        <input ref={ref} type="color" value={val || '#000000'} onChange={e => onChange(e.target.value)} style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
+        <div className="color-swatch" style={{ background: resolved || 'transparent' }} onClick={() => ref.current?.click()} />
+        <input ref={ref} type="color" value={/^#[0-9a-fA-F]{6}$/.test(resolved) ? resolved : '#000000'} onChange={e => onChange(e.target.value)} style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
         <input className="input input-sm" value={val} onChange={e => onChange(e.target.value)} placeholder="transparent" />
       </div>
+      {tokens && tokens.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+          {tokens.map(t => (
+            <button key={t.id} title={`${t.name} — lier`} onClick={() => onChange(`var(--tok-${t.id})`)}
+              style={{ width: 16, height: 16, borderRadius: 4, background: t.value, cursor: 'pointer',
+                border: val === `var(--tok-${t.id})` ? '2px solid var(--text)' : '1px solid var(--border2)' }} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -46,7 +62,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ─── Panel propriétés ─────────────────────────────────────────────────────
 
 export default function PropertiesPanel() {
-  const { screens, currentScreenId, selectedIds, messages, addMessage, clearMessages, claudeLoading, setClaudeLoading, updateBlock, updateBlockStyle, updateScreen, pushHistory } = useStore()
+  const { screens, currentScreenId, tokens, selectedIds, messages, addMessage, clearMessages, claudeLoading, setClaudeLoading, updateBlock, updateBlockStyle, updateScreen, pushHistory } = useStore()
   const blocks = screens.find(s => s.id === currentScreenId)?.blocks ?? []
   const currentScreen = screens.find(s => s.id === currentScreenId)
   const [input, setInput] = useState('')
@@ -139,7 +155,7 @@ export default function PropertiesPanel() {
                   ))}
                 </div>
               </div>
-              <ColorInput label="Fond de l'écran" value={currentScreen.background} onChange={v => updateScreen(currentScreen.id, { background: v })} />
+              <ColorInput label="Fond de l'écran" value={currentScreen.background} onChange={v => updateScreen(currentScreen.id, { background: v })} tokens={tokens.colors} />
               <div style={{ color: 'var(--muted)', fontSize: 11, paddingTop: 4 }}>Sélectionne un bloc pour éditer son style.</div>
             </Section>
           ) : (
@@ -177,7 +193,7 @@ export default function PropertiesPanel() {
                   </div>
                 </div>
                 <NumberInput label="Interligne" value={block.style.lineHeight} onChange={v => upStyle({ lineHeight: v })} min={1} max={3} />
-                <ColorInput label="Couleur texte" value={block.style.color} onChange={v => upStyle({ color: v })} />
+                <ColorInput label="Couleur texte" value={block.style.color} onChange={v => upStyle({ color: v })} tokens={tokens.colors} />
                 {/* Alignement */}
                 <div>
                   <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Alignement</div>
@@ -216,14 +232,14 @@ export default function PropertiesPanel() {
 
             {/* Apparence */}
             <Section title="Apparence">
-              <ColorInput label="Fond" value={block.style.backgroundColor} onChange={v => upStyle({ backgroundColor: v })} />
+              <ColorInput label="Fond" value={block.style.backgroundColor} onChange={v => upStyle({ backgroundColor: v })} tokens={tokens.colors} />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <NumberInput label="Radius" value={block.style.borderRadius} onChange={v => upStyle({ borderRadius: v })} min={0} max={100} unit="px" />
                 <NumberInput label="Opacité" value={block.style.opacity} onChange={v => upStyle({ opacity: Math.min(1, Math.max(0, v)) })} min={0} max={1} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <NumberInput label="Bordure" value={block.style.borderWidth} onChange={v => upStyle({ borderWidth: v })} min={0} max={20} unit="px" />
-                <ColorInput label="Couleur bordure" value={block.style.borderColor} onChange={v => upStyle({ borderColor: v })} />
+                <ColorInput label="Couleur bordure" value={block.style.borderColor} onChange={v => upStyle({ borderColor: v })} tokens={tokens.colors} />
               </div>
             </Section>
 
@@ -247,6 +263,20 @@ export default function PropertiesPanel() {
                   <Link size={12} style={{ color: 'var(--muted)', flexShrink: 0 }} />
                   <input className="input input-sm" placeholder="https://..." value={block.href || ''} onChange={e => upBlock({ href: e.target.value })} />
                 </div>
+              </Section>
+            )}
+
+            {/* Interaction / prototypage */}
+            {screens.length > 1 && (
+              <Section title="Interaction">
+                <div>
+                  <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Au clic, aller à</div>
+                  <select className="input input-sm" value={block.linkTo || ''} onChange={e => upBlock({ linkTo: e.target.value || undefined })}>
+                    <option value="">— Aucun —</option>
+                    {screens.filter(s => s.id !== currentScreenId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', opacity: 0.7 }}>Navigation active en mode présentation.</div>
               </Section>
             )}
           </>

@@ -1,6 +1,12 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import type { Block, ImportMode, LeftTab, Message, BlockStyle, Screen } from './types'
+import type {
+  Block, ImportMode, LeftTab, Message, BlockStyle, Screen,
+  ProjectMeta, ProjectDoc, DesignTokens, ColorToken, TextStyleToken, ComponentDef, AppView,
+} from './types'
+import {
+  loadIndex, saveIndex, loadActiveId, saveActiveId, loadDoc, saveDoc, removeDoc,
+  defaultTokens, normalizeDoc,
+} from './storage'
 
 const rid = (p = 'id') => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
@@ -11,15 +17,9 @@ export function makeScreen(name: string, blocks: Block[] = [], partial?: Partial
 }
 
 function cloneBlock(b: Block): Block {
-  return {
-    ...b,
-    id: rid('b'),
-    style: { ...b.style },
-    children: b.children?.map(cloneBlock),
-  }
+  return { ...b, id: rid('b'), style: { ...b.style }, children: b.children?.map(cloneBlock) }
 }
 
-// Trouver un bloc (top-level ou enfant) dans une liste
 function findBlock(blocks: Block[], id: string): { block: Block; parentId?: string } | null {
   for (const b of blocks) {
     if (b.id === id) return { block: b }
@@ -29,7 +29,6 @@ function findBlock(blocks: Block[], id: string): { block: Block; parentId?: stri
   return null
 }
 
-// Mettre à jour un bloc (top-level ou enfant) immutablement
 function updateInTree(blocks: Block[], id: string, changes: Partial<Block>, parentId?: string): Block[] {
   return blocks.map(b => {
     if (parentId) {
@@ -48,14 +47,22 @@ function updateInTree(blocks: Block[], id: string, changes: Partial<Block>, pare
 type DocSnapshot = { screens: Screen[]; currentScreenId: string }
 
 interface AppState {
-  // Projet
-  projectName: string
+  // App
+  appView: AppView
+  ready: boolean
 
-  // Document multi-écrans
+  // Projet actif
+  projectId: string
+  projectName: string
+  projects: ProjectMeta[]
+
+  // Document
   screens: Screen[]
   currentScreenId: string
+  tokens: DesignTokens
+  components: ComponentDef[]
 
-  // Historique (session uniquement, non persisté)
+  // Historique (session)
   past: DocSnapshot[]
   future: DocSnapshot[]
 
@@ -67,6 +74,9 @@ interface AppState {
   zoom: number
   panX: number
   panY: number
+
+  // Présentation (prototype)
+  presenting: boolean
 
   // UI
   leftTab: LeftTab
@@ -82,12 +92,23 @@ interface AppState {
   getBlocks: () => Block[]
   getCurrentScreen: () => Screen | undefined
 
+  // ── Persistance / projets ──
+  bootstrap: () => void
+  persistNow: () => void
+  goToDashboard: () => void
+  openEditor: () => void
+  createProject: (name?: string) => void
+  openProject: (id: string) => void
+  deleteProject: (id: string) => void
+  duplicateProject: (id: string) => void
+  renameProject: (id: string, name: string) => void
+
   // ── Historique ──
   pushHistory: (label?: string) => void
   undo: () => void
   redo: () => void
 
-  // ── Projet ──
+  // ── Projet (document actif) ──
   setProjectName: (n: string) => void
   newProject: () => void
   loadProject: (projectName: string, screens: Screen[]) => void
@@ -124,10 +145,28 @@ interface AppState {
   // ── Alignement ──
   alignBlocks: (axis: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => void
 
+  // ── Design tokens ──
+  addColorToken: (name: string, value: string) => void
+  updateColorToken: (id: string, changes: Partial<ColorToken>) => void
+  deleteColorToken: (id: string) => void
+  addTextStyle: (style: Omit<TextStyleToken, 'id'>) => void
+  updateTextStyle: (id: string, changes: Partial<TextStyleToken>) => void
+  deleteTextStyle: (id: string) => void
+  applyTextStyle: (blockId: string, styleId: string, parentId?: string) => void
+
+  // ── Composants réutilisables ──
+  saveSelectionAsComponent: (name: string) => void
+  insertComponent: (id: string) => void
+  deleteComponent: (id: string) => void
+  renameComponent: (id: string, name: string) => void
+
   // ── Vue ──
   setZoom: (z: number) => void
   setPan: (x: number, y: number) => void
   zoomToFit: () => void
+
+  // ── Présentation ──
+  setPresenting: (v: boolean) => void
 
   // ── UI ──
   setLeftTab: (t: LeftTab) => void
@@ -140,373 +179,462 @@ interface AppState {
   setClaudeLoading: (v: boolean) => void
 }
 
-// Coalescing de l'historique : regroupe les éditions rapides du même type
 let lastHistoryLabel = ''
 let lastHistoryTime = 0
 
-// Met à jour les blocs de l'écran courant immutablement
+const currentBlocks = (s: AppState): Block[] =>
+  s.screens.find(scr => scr.id === s.currentScreenId)?.blocks ?? []
+
 function patchScreens(s: AppState, fn: (blocks: Block[]) => Block[]): Pick<AppState, 'screens'> {
+  return { screens: s.screens.map(scr => scr.id === s.currentScreenId ? { ...scr, blocks: fn(scr.blocks) } : scr) }
+}
+
+function docFrom(s: AppState): ProjectDoc {
   return {
-    screens: s.screens.map(scr =>
-      scr.id === s.currentScreenId ? { ...scr, blocks: fn(scr.blocks) } : scr
-    ),
+    projectName: s.projectName,
+    screens: s.screens,
+    currentScreenId: s.currentScreenId,
+    tokens: s.tokens,
+    components: s.components,
+  }
+}
+
+function docToState(doc: ProjectDoc): Partial<AppState> {
+  const n = normalizeDoc(doc)
+  return {
+    projectName: n.projectName, screens: n.screens, currentScreenId: n.currentScreenId,
+    tokens: n.tokens, components: n.components,
+    past: [], future: [], selectedIds: [], editingId: null,
   }
 }
 
 const initialScreen = makeScreen('Écran 1')
 
-export const useStore = create<AppState>()(
-  persist(
-    (set, get) => ({
-      projectName: 'Nouveau projet',
-      screens: [initialScreen],
-      currentScreenId: initialScreen.id,
-      past: [],
-      future: [],
-      selectedIds: [],
-      editingId: null,
-      zoom: 0.6,
-      panX: 60,
-      panY: 40,
-      leftTab: 'library',
-      importMode: null,
-      status: 'idle',
-      error: null,
-      messages: [],
-      claudeLoading: false,
+export const useStore = create<AppState>()((set, get) => ({
+  appView: 'editor',
+  ready: false,
+  projectId: '',
+  projectName: 'Nouveau projet',
+  projects: [],
+  screens: [initialScreen],
+  currentScreenId: initialScreen.id,
+  tokens: defaultTokens(),
+  components: [],
+  past: [],
+  future: [],
+  selectedIds: [],
+  editingId: null,
+  zoom: 0.6,
+  panX: 60,
+  panY: 40,
+  presenting: false,
+  leftTab: 'library',
+  importMode: null,
+  status: 'idle',
+  error: null,
+  messages: [],
+  claudeLoading: false,
 
-      // ── Lecture ──
-      getBlocks: () => {
-        const s = get()
-        return s.screens.find(scr => scr.id === s.currentScreenId)?.blocks ?? []
-      },
-      getCurrentScreen: () => {
-        const s = get()
-        return s.screens.find(scr => scr.id === s.currentScreenId)
-      },
+  // ── Lecture ──
+  getBlocks: () => currentBlocks(get()),
+  getCurrentScreen: () => { const s = get(); return s.screens.find(scr => scr.id === s.currentScreenId) },
 
-      // ── Historique ──
-      pushHistory: (label) => set(s => {
-        const now = Date.now()
-        // Coalesce les éditions rapides de même nature (drag, frappe clavier…)
-        if (label && label === lastHistoryLabel && now - lastHistoryTime < 600) {
-          lastHistoryTime = now
-          return s
-        }
-        lastHistoryLabel = label || ''
-        lastHistoryTime = now
-        const snap: DocSnapshot = { screens: s.screens, currentScreenId: s.currentScreenId }
-        return { past: [...s.past, snap].slice(-60), future: [] }
-      }),
-
-      undo: () => set(s => {
-        if (!s.past.length) return s
-        const prev = s.past[s.past.length - 1]
-        const cur: DocSnapshot = { screens: s.screens, currentScreenId: s.currentScreenId }
-        lastHistoryLabel = ''
-        return {
-          screens: prev.screens,
-          currentScreenId: prev.screens.some(x => x.id === prev.currentScreenId) ? prev.currentScreenId : prev.screens[0]?.id,
-          past: s.past.slice(0, -1),
-          future: [cur, ...s.future].slice(0, 60),
-          selectedIds: [],
-          editingId: null,
-        }
-      }),
-
-      redo: () => set(s => {
-        if (!s.future.length) return s
-        const next = s.future[0]
-        const cur: DocSnapshot = { screens: s.screens, currentScreenId: s.currentScreenId }
-        lastHistoryLabel = ''
-        return {
-          screens: next.screens,
-          currentScreenId: next.currentScreenId,
-          past: [...s.past, cur].slice(-60),
-          future: s.future.slice(1),
-          selectedIds: [],
-          editingId: null,
-        }
-      }),
-
-      // ── Projet ──
-      setProjectName: (n) => set({ projectName: n }),
-
-      newProject: () => {
-        const scr = makeScreen('Écran 1')
-        set({
-          screens: [scr], currentScreenId: scr.id,
-          past: [], future: [],
-          selectedIds: [], editingId: null,
-          zoom: 0.6, panX: 60, panY: 40,
-          status: 'idle', error: null, messages: [],
-          projectName: 'Nouveau projet', leftTab: 'library',
-        })
-      },
-
-      loadProject: (projectName, screens) => {
-        // Normalise : garantit des ids et des champs valides
-        const norm: Screen[] = (screens || []).map((s, i) => ({
-          id: s.id || rid('scr'),
-          name: s.name || `Écran ${i + 1}`,
-          width: s.width || 1440,
-          height: s.height || 1024,
-          background: s.background || '#0d0d12',
-          blocks: Array.isArray(s.blocks) ? s.blocks : [],
-        }))
-        const safe = norm.length ? norm : [makeScreen('Écran 1')]
-        set({
-          projectName: projectName || 'Projet importé',
-          screens: safe, currentScreenId: safe[0].id,
-          past: [], future: [],
-          selectedIds: [], editingId: null,
-          status: 'idle', error: null, leftTab: 'layers',
-        })
-      },
-
-      // ── Écrans ──
-      addScreen: () => {
-        get().pushHistory()
-        const s = get()
-        const scr = makeScreen(`Écran ${s.screens.length + 1}`)
-        set({ screens: [...s.screens, scr], currentScreenId: scr.id, selectedIds: [], editingId: null })
-      },
-
-      addScreenWithBlocks: (name, blocks, size) => {
-        get().pushHistory()
-        const s = get()
-        const scr = makeScreen(name || `Écran ${s.screens.length + 1}`, blocks, size)
-        set({ screens: [...s.screens, scr], currentScreenId: scr.id, selectedIds: blocks.map(b => b.id), editingId: null, leftTab: 'layers' })
-      },
-
-      deleteScreen: (id) => {
-        const s = get()
-        if (s.screens.length <= 1) return
-        get().pushHistory()
-        const idx = s.screens.findIndex(x => x.id === id)
-        const screens = s.screens.filter(x => x.id !== id)
-        const currentScreenId = s.currentScreenId === id
-          ? screens[Math.max(0, idx - 1)].id
-          : s.currentScreenId
-        set({ screens, currentScreenId, selectedIds: [], editingId: null })
-      },
-
-      renameScreen: (id, name) => {
-        get().pushHistory('rename')
-        set(s => ({ screens: s.screens.map(x => x.id === id ? { ...x, name } : x) }))
-      },
-
-      duplicateScreen: (id) => {
-        get().pushHistory()
-        const s = get()
-        const src = s.screens.find(x => x.id === id)
-        if (!src) return
-        const copy = makeScreen(`${src.name} copie`, src.blocks.map(cloneBlock), { width: src.width, height: src.height, background: src.background })
-        const idx = s.screens.findIndex(x => x.id === id)
-        const screens = [...s.screens.slice(0, idx + 1), copy, ...s.screens.slice(idx + 1)]
-        set({ screens, currentScreenId: copy.id, selectedIds: [], editingId: null })
-      },
-
-      setCurrentScreen: (id) => set({ currentScreenId: id, selectedIds: [], editingId: null }),
-
-      moveScreen: (id, toIndex) => set(s => {
-        const from = s.screens.findIndex(x => x.id === id)
-        if (from < 0) return s
-        const screens = [...s.screens]
-        const [moved] = screens.splice(from, 1)
-        screens.splice(Math.max(0, Math.min(screens.length, toIndex)), 0, moved)
-        return { screens }
-      }),
-
-      updateScreen: (id, changes) => {
-        get().pushHistory('screen-prop')
-        set(s => ({ screens: s.screens.map(x => x.id === id ? { ...x, ...changes } : x) }))
-      },
-
-      // ── Blocs ──
-      addBlock: (b) => {
-        get().pushHistory()
-        set(s => ({ ...patchScreens(s, bs => [...bs, b]), selectedIds: [b.id], leftTab: 'layers' }))
-      },
-
-      addBlocks: (bs) => {
-        get().pushHistory()
-        set(s => ({ ...patchScreens(s, prev => [...prev, ...bs]), selectedIds: bs.map(b => b.id), leftTab: 'layers' }))
-      },
-
-      updateBlock: (id, changes, parentId) =>
-        set(s => patchScreens(s, bs => updateInTree(bs, id, changes, parentId))),
-
-      updateBlockStyle: (id, style, parentId) =>
-        set(s => {
-          const blocks = s.screens.find(scr => scr.id === s.currentScreenId)?.blocks ?? []
-          const found = findBlock(blocks, id)
-          const merged = { ...(found?.block.style || {}), ...style }
-          return patchScreens(s, bs => updateInTree(bs, id, { style: merged }, parentId))
-        }),
-
-      deleteSelected: () => {
-        const s = get()
-        if (!s.selectedIds.length) return
-        get().pushHistory()
-        set(st => ({
-          ...patchScreens(st, bs => bs
-            .filter(b => !st.selectedIds.includes(b.id))
-            .map(b => b.children ? { ...b, children: b.children.filter(c => !st.selectedIds.includes(c.id)) } : b)
-          ),
-          selectedIds: [],
-        }))
-      },
-
-      duplicateSelected: () => {
-        const s = get()
-        if (!s.selectedIds.length) return
-        get().pushHistory()
-        set(st => {
-          const blocks = st.screens.find(scr => scr.id === st.currentScreenId)?.blocks ?? []
-          const clones = st.selectedIds.flatMap(id => {
-            const b = blocks.find(x => x.id === id)
-            if (!b) return []
-            const c = cloneBlock(b)
-            c.x += 20; c.y += 20
-            return [c]
-          })
-          return { ...patchScreens(st, bs => [...bs, ...clones]), selectedIds: clones.map(c => c.id) }
-        })
-      },
-
-      moveBlock: (id, dx, dy, parentId) =>
-        set(s => {
-          const blocks = s.screens.find(scr => scr.id === s.currentScreenId)?.blocks ?? []
-          const found = parentId
-            ? blocks.find(b => b.id === parentId)?.children?.find(c => c.id === id)
-            : blocks.find(b => b.id === id)
-          if (!found) return s
-          return patchScreens(s, bs => updateInTree(bs, id, { x: found.x + dx, y: found.y + dy }, parentId))
-        }),
-
-      // ── Sélection ──
-      select: (id, multi = false) =>
-        set(s => ({
-          selectedIds: multi
-            ? s.selectedIds.includes(id) ? s.selectedIds.filter(i => i !== id) : [...s.selectedIds, id]
-            : [id],
-          editingId: null,
-        })),
-
-      selectAll: () => set(s => ({ selectedIds: (s.screens.find(scr => scr.id === s.currentScreenId)?.blocks ?? []).map(b => b.id) })),
-      clearSelection: () => set({ selectedIds: [], editingId: null }),
-      setEditing: (id) => set(s => ({ editingId: id, selectedIds: id ? [id] : s.selectedIds })),
-
-      bringForward: (id) => {
-        get().pushHistory()
-        set(s => {
-          const blocks = s.screens.find(scr => scr.id === s.currentScreenId)?.blocks ?? []
-          const i = blocks.findIndex(b => b.id === id)
-          if (i < 0 || i >= blocks.length - 1) return s
-          return patchScreens(s, bs => {
-            const arr = [...bs]
-            ;[arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]
-            return arr
-          })
-        })
-      },
-
-      sendBackward: (id) => {
-        get().pushHistory()
-        set(s => {
-          const blocks = s.screens.find(scr => scr.id === s.currentScreenId)?.blocks ?? []
-          const i = blocks.findIndex(b => b.id === id)
-          if (i <= 0) return s
-          return patchScreens(s, bs => {
-            const arr = [...bs]
-            ;[arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]
-            return arr
-          })
-        })
-      },
-
-      alignBlocks: (axis) => {
-        const s = get()
-        if (s.selectedIds.length < 2) return
-        get().pushHistory()
-        set(st => {
-          const blocks = st.screens.find(scr => scr.id === st.currentScreenId)?.blocks ?? []
-          const selected = blocks.filter(b => st.selectedIds.includes(b.id))
-          const minX = Math.min(...selected.map(b => b.x))
-          const maxX = Math.max(...selected.map(b => b.x + b.width))
-          const minY = Math.min(...selected.map(b => b.y))
-          const maxY = Math.max(...selected.map(b => b.y + b.height))
-          const centerX = (minX + maxX) / 2
-          const centerY = (minY + maxY) / 2
-          return patchScreens(st, bs => bs.map(b => {
-            if (!st.selectedIds.includes(b.id)) return b
-            switch (axis) {
-              case 'left':   return { ...b, x: minX }
-              case 'center': return { ...b, x: centerX - b.width / 2 }
-              case 'right':  return { ...b, x: maxX - b.width }
-              case 'top':    return { ...b, y: minY }
-              case 'middle': return { ...b, y: centerY - b.height / 2 }
-              case 'bottom': return { ...b, y: maxY - b.height }
-              default: return b
-            }
-          }))
-        })
-      },
-
-      // ── Vue ──
-      setZoom: (zoom) => set({ zoom }),
-      setPan: (panX, panY) => set({ panX, panY }),
-      zoomToFit: () => set(s => {
-        const screen = s.screens.find(scr => scr.id === s.currentScreenId)
-        const blocks = screen?.blocks ?? []
-        const rects = [
-          ...(screen ? [{ x: 0, y: 0, width: screen.width, height: screen.height }] : []),
-          ...blocks.flatMap(b => b.children
-            ? [b, ...b.children.map(c => ({ ...c, x: b.x + c.x, y: b.y + c.y }))]
-            : [b]),
-        ]
-        if (!rects.length) return { zoom: 0.6, panX: 60, panY: 40 }
-        const minX = Math.min(...rects.map(b => b.x))
-        const maxX = Math.max(...rects.map(b => b.x + b.width))
-        const minY = Math.min(...rects.map(b => b.y))
-        const maxY = Math.max(...rects.map(b => b.y + b.height))
-        const contentW = maxX - minX + 80
-        const contentH = maxY - minY + 80
-        const viewW = 900, viewH = 700
-        const zoom = Math.min(0.95, Math.min(viewW / contentW, viewH / contentH))
-        return { zoom, panX: (viewW - contentW * zoom) / 2 - minX * zoom + 40, panY: 40 - minY * zoom + 40 }
-      }),
-
-      // ── UI ──
-      setLeftTab: (leftTab) => set({ leftTab }),
-      setImportMode: (importMode) => set({ importMode }),
-      setStatus: (status, err) => set({ status, error: err || null }),
-
-      // ── Claude ──
-      addMessage: (m) => set(s => ({ messages: [...s.messages, m] })),
-      clearMessages: () => set({ messages: [] }),
-      setClaudeLoading: (claudeLoading) => set({ claudeLoading }),
-    }),
-    {
-      name: 'hub-inspector-doc',
-      // Stockage tolérant : un quota localStorage dépassé (screenshots base64 lourds)
-      // ne doit pas faire planter l'édition — on ignore juste la sauvegarde.
-      storage: createJSONStorage(() => ({
-        getItem: (n) => localStorage.getItem(n),
-        setItem: (n, v) => { try { localStorage.setItem(n, v) } catch (e) { console.warn('Persistance ignorée (quota localStorage ?)', e) } },
-        removeItem: (n) => localStorage.removeItem(n),
-      })),
-      version: 1,
-      partialize: (s) => ({
-        projectName: s.projectName,
-        screens: s.screens,
-        currentScreenId: s.currentScreenId,
-        zoom: s.zoom,
-        panX: s.panX,
-        panY: s.panY,
-        leftTab: s.leftTab,
-      }),
+  // ── Persistance / projets ──
+  bootstrap: () => {
+    if (get().ready) return
+    const index = loadIndex()
+    if (!index.length) {
+      // Premier lancement : crée le projet par défaut depuis l'état initial
+      const id = rid('proj')
+      const meta: ProjectMeta = { id, name: get().projectName, createdAt: Date.now(), updatedAt: Date.now() }
+      saveDoc(id, docFrom(get()))
+      saveIndex([meta]); saveActiveId(id)
+      set({ projectId: id, projects: [meta], ready: true })
+      return
     }
-  )
-)
+    const wanted = loadActiveId()
+    const activeId = wanted && index.some(p => p.id === wanted) ? wanted : index[0].id
+    const doc = loadDoc(activeId)
+    set({ projectId: activeId, projects: index, ready: true, ...(doc ? docToState(doc) : {}) })
+    saveActiveId(activeId)
+  },
+
+  persistNow: () => {
+    const s = get()
+    if (!s.ready || !s.projectId) return
+    saveDoc(s.projectId, docFrom(s))
+    // Met à jour l'index en storage uniquement (pas de set() → évite une boucle autosave)
+    const idx = loadIndex()
+    const updated = idx.map(p => p.id === s.projectId ? { ...p, name: s.projectName, updatedAt: Date.now() } : p)
+    saveIndex(updated.length ? updated : [{ id: s.projectId, name: s.projectName, createdAt: Date.now(), updatedAt: Date.now() }])
+    saveActiveId(s.projectId)
+  },
+
+  goToDashboard: () => { get().persistNow(); set({ appView: 'dashboard', projects: loadIndex(), presenting: false }) },
+  openEditor: () => set({ appView: 'editor' }),
+
+  createProject: (name) => {
+    get().persistNow()
+    const id = rid('proj')
+    const scr = makeScreen('Écran 1')
+    const pname = name?.trim() || 'Nouveau projet'
+    const meta: ProjectMeta = { id, name: pname, createdAt: Date.now(), updatedAt: Date.now() }
+    const doc: ProjectDoc = { projectName: pname, screens: [scr], currentScreenId: scr.id, tokens: defaultTokens(), components: [] }
+    saveDoc(id, doc)
+    const projects = [meta, ...loadIndex().filter(p => p.id !== id)]
+    saveIndex(projects); saveActiveId(id)
+    set({
+      projectId: id, projects, appView: 'editor',
+      projectName: pname, screens: [scr], currentScreenId: scr.id, tokens: doc.tokens, components: [],
+      past: [], future: [], selectedIds: [], editingId: null, zoom: 0.6, panX: 60, panY: 40, leftTab: 'library',
+    })
+  },
+
+  openProject: (id) => {
+    get().persistNow()
+    const doc = loadDoc(id)
+    saveActiveId(id)
+    set({ projectId: id, appView: 'editor', zoom: 0.6, panX: 60, panY: 40, ...(doc ? docToState(doc) : {}) })
+  },
+
+  deleteProject: (id) => {
+    removeDoc(id)
+    let projects = loadIndex().filter(p => p.id !== id)
+    const s = get()
+    if (!projects.length) {
+      // Recrée un projet vide
+      const nid = rid('proj')
+      const scr = makeScreen('Écran 1')
+      const meta: ProjectMeta = { id: nid, name: 'Nouveau projet', createdAt: Date.now(), updatedAt: Date.now() }
+      saveDoc(nid, { projectName: 'Nouveau projet', screens: [scr], currentScreenId: scr.id, tokens: defaultTokens(), components: [] })
+      projects = [meta]; saveIndex(projects); saveActiveId(nid)
+      set({ projects, projectId: nid, projectName: 'Nouveau projet', screens: [scr], currentScreenId: scr.id, tokens: defaultTokens(), components: [], past: [], future: [], selectedIds: [], editingId: null })
+      return
+    }
+    saveIndex(projects)
+    if (s.projectId === id) {
+      const next = projects[0]
+      const doc = loadDoc(next.id)
+      saveActiveId(next.id)
+      set({ projects, projectId: next.id, ...(doc ? docToState(doc) : {}) })
+    } else {
+      set({ projects })
+    }
+  },
+
+  duplicateProject: (id) => {
+    const doc = normalizeDoc(loadDoc(id))
+    const nid = rid('proj')
+    const name = `${doc.projectName} copie`
+    const copy: ProjectDoc = {
+      ...doc, projectName: name,
+      screens: doc.screens.map(scr => ({ ...scr, id: rid('scr'), blocks: scr.blocks.map(cloneBlock) })),
+      currentScreenId: '',
+    }
+    copy.currentScreenId = copy.screens[0]?.id || ''
+    saveDoc(nid, copy)
+    const meta: ProjectMeta = { id: nid, name, createdAt: Date.now(), updatedAt: Date.now() }
+    const projects = [meta, ...loadIndex()]
+    saveIndex(projects)
+    set({ projects })
+  },
+
+  renameProject: (id, name) => {
+    const projects = loadIndex().map(p => p.id === id ? { ...p, name, updatedAt: Date.now() } : p)
+    saveIndex(projects)
+    const s = get()
+    if (s.projectId === id) { saveDoc(id, { ...docFrom(s), projectName: name }); set({ projects, projectName: name }) }
+    else set({ projects })
+  },
+
+  // ── Historique ──
+  pushHistory: (label) => set(s => {
+    const now = Date.now()
+    if (label && label === lastHistoryLabel && now - lastHistoryTime < 600) { lastHistoryTime = now; return s }
+    lastHistoryLabel = label || ''; lastHistoryTime = now
+    return { past: [...s.past, { screens: s.screens, currentScreenId: s.currentScreenId }].slice(-60), future: [] }
+  }),
+
+  undo: () => set(s => {
+    if (!s.past.length) return s
+    const prev = s.past[s.past.length - 1]
+    lastHistoryLabel = ''
+    return {
+      screens: prev.screens,
+      currentScreenId: prev.screens.some(x => x.id === prev.currentScreenId) ? prev.currentScreenId : prev.screens[0]?.id,
+      past: s.past.slice(0, -1),
+      future: [{ screens: s.screens, currentScreenId: s.currentScreenId }, ...s.future].slice(0, 60),
+      selectedIds: [], editingId: null,
+    }
+  }),
+
+  redo: () => set(s => {
+    if (!s.future.length) return s
+    const next = s.future[0]
+    lastHistoryLabel = ''
+    return {
+      screens: next.screens, currentScreenId: next.currentScreenId,
+      past: [...s.past, { screens: s.screens, currentScreenId: s.currentScreenId }].slice(-60),
+      future: s.future.slice(1),
+      selectedIds: [], editingId: null,
+    }
+  }),
+
+  // ── Projet (document actif) ──
+  setProjectName: (n) => set({ projectName: n }),
+
+  newProject: () => {
+    const scr = makeScreen('Écran 1')
+    set({
+      screens: [scr], currentScreenId: scr.id, past: [], future: [],
+      selectedIds: [], editingId: null, zoom: 0.6, panX: 60, panY: 40,
+      status: 'idle', error: null, messages: [], leftTab: 'library',
+    })
+  },
+
+  loadProject: (projectName, screens) => {
+    const n = normalizeDoc({ projectName, screens, currentScreenId: '', tokens: get().tokens, components: get().components })
+    set({
+      projectName: n.projectName, screens: n.screens, currentScreenId: n.currentScreenId,
+      past: [], future: [], selectedIds: [], editingId: null, status: 'idle', error: null, leftTab: 'layers',
+    })
+  },
+
+  // ── Écrans ──
+  addScreen: () => {
+    get().pushHistory()
+    const s = get()
+    const scr = makeScreen(`Écran ${s.screens.length + 1}`)
+    set({ screens: [...s.screens, scr], currentScreenId: scr.id, selectedIds: [], editingId: null })
+  },
+
+  addScreenWithBlocks: (name, blocks, size) => {
+    get().pushHistory()
+    const s = get()
+    const scr = makeScreen(name || `Écran ${s.screens.length + 1}`, blocks, size)
+    set({ screens: [...s.screens, scr], currentScreenId: scr.id, selectedIds: blocks.map(b => b.id), editingId: null, leftTab: 'layers' })
+  },
+
+  deleteScreen: (id) => {
+    const s = get()
+    if (s.screens.length <= 1) return
+    get().pushHistory()
+    const idx = s.screens.findIndex(x => x.id === id)
+    const screens = s.screens.filter(x => x.id !== id)
+    const currentScreenId = s.currentScreenId === id ? screens[Math.max(0, idx - 1)].id : s.currentScreenId
+    set({ screens, currentScreenId, selectedIds: [], editingId: null })
+  },
+
+  renameScreen: (id, name) => { get().pushHistory('rename'); set(s => ({ screens: s.screens.map(x => x.id === id ? { ...x, name } : x) })) },
+
+  duplicateScreen: (id) => {
+    get().pushHistory()
+    const s = get()
+    const src = s.screens.find(x => x.id === id)
+    if (!src) return
+    const copy = makeScreen(`${src.name} copie`, src.blocks.map(cloneBlock), { width: src.width, height: src.height, background: src.background })
+    const idx = s.screens.findIndex(x => x.id === id)
+    set({ screens: [...s.screens.slice(0, idx + 1), copy, ...s.screens.slice(idx + 1)], currentScreenId: copy.id, selectedIds: [], editingId: null })
+  },
+
+  setCurrentScreen: (id) => set({ currentScreenId: id, selectedIds: [], editingId: null }),
+
+  moveScreen: (id, toIndex) => set(s => {
+    const from = s.screens.findIndex(x => x.id === id)
+    if (from < 0) return s
+    const screens = [...s.screens]
+    const [moved] = screens.splice(from, 1)
+    screens.splice(Math.max(0, Math.min(screens.length, toIndex)), 0, moved)
+    return { screens }
+  }),
+
+  updateScreen: (id, changes) => { get().pushHistory('screen-prop'); set(s => ({ screens: s.screens.map(x => x.id === id ? { ...x, ...changes } : x) })) },
+
+  // ── Blocs ──
+  addBlock: (b) => { get().pushHistory(); set(s => ({ ...patchScreens(s, bs => [...bs, b]), selectedIds: [b.id], leftTab: 'layers' })) },
+
+  addBlocks: (bs) => { get().pushHistory(); set(s => ({ ...patchScreens(s, prev => [...prev, ...bs]), selectedIds: bs.map(b => b.id), leftTab: 'layers' })) },
+
+  updateBlock: (id, changes, parentId) => set(s => patchScreens(s, bs => updateInTree(bs, id, changes, parentId))),
+
+  updateBlockStyle: (id, style, parentId) => set(s => {
+    const found = findBlock(currentBlocks(s), id)
+    const merged = { ...(found?.block.style || {}), ...style }
+    return patchScreens(s, bs => updateInTree(bs, id, { style: merged }, parentId))
+  }),
+
+  deleteSelected: () => {
+    const s = get()
+    if (!s.selectedIds.length) return
+    get().pushHistory()
+    set(st => ({
+      ...patchScreens(st, bs => bs
+        .filter(b => !st.selectedIds.includes(b.id))
+        .map(b => b.children ? { ...b, children: b.children.filter(c => !st.selectedIds.includes(c.id)) } : b)),
+      selectedIds: [],
+    }))
+  },
+
+  duplicateSelected: () => {
+    const s = get()
+    if (!s.selectedIds.length) return
+    get().pushHistory()
+    set(st => {
+      const blocks = currentBlocks(st)
+      const clones = st.selectedIds.flatMap(id => {
+        const b = blocks.find(x => x.id === id)
+        if (!b) return []
+        const c = cloneBlock(b); c.x += 20; c.y += 20; return [c]
+      })
+      return { ...patchScreens(st, bs => [...bs, ...clones]), selectedIds: clones.map(c => c.id) }
+    })
+  },
+
+  moveBlock: (id, dx, dy, parentId) => set(s => {
+    const blocks = currentBlocks(s)
+    const found = parentId
+      ? blocks.find(b => b.id === parentId)?.children?.find(c => c.id === id)
+      : blocks.find(b => b.id === id)
+    if (!found) return s
+    return patchScreens(s, bs => updateInTree(bs, id, { x: found.x + dx, y: found.y + dy }, parentId))
+  }),
+
+  // ── Sélection ──
+  select: (id, multi = false) => set(s => ({
+    selectedIds: multi
+      ? s.selectedIds.includes(id) ? s.selectedIds.filter(i => i !== id) : [...s.selectedIds, id]
+      : [id],
+    editingId: null,
+  })),
+
+  selectAll: () => set(s => ({ selectedIds: currentBlocks(s).map(b => b.id) })),
+  clearSelection: () => set({ selectedIds: [], editingId: null }),
+  setEditing: (id) => set(s => ({ editingId: id, selectedIds: id ? [id] : s.selectedIds })),
+
+  bringForward: (id) => {
+    get().pushHistory()
+    set(s => {
+      const blocks = currentBlocks(s)
+      const i = blocks.findIndex(b => b.id === id)
+      if (i < 0 || i >= blocks.length - 1) return s
+      return patchScreens(s, bs => { const a = [...bs]; [a[i], a[i + 1]] = [a[i + 1], a[i]]; return a })
+    })
+  },
+
+  sendBackward: (id) => {
+    get().pushHistory()
+    set(s => {
+      const blocks = currentBlocks(s)
+      const i = blocks.findIndex(b => b.id === id)
+      if (i <= 0) return s
+      return patchScreens(s, bs => { const a = [...bs]; [a[i - 1], a[i]] = [a[i], a[i - 1]]; return a })
+    })
+  },
+
+  alignBlocks: (axis) => {
+    const s = get()
+    if (s.selectedIds.length < 2) return
+    get().pushHistory()
+    set(st => {
+      const blocks = currentBlocks(st)
+      const sel = blocks.filter(b => st.selectedIds.includes(b.id))
+      const minX = Math.min(...sel.map(b => b.x)), maxX = Math.max(...sel.map(b => b.x + b.width))
+      const minY = Math.min(...sel.map(b => b.y)), maxY = Math.max(...sel.map(b => b.y + b.height))
+      const cX = (minX + maxX) / 2, cY = (minY + maxY) / 2
+      return patchScreens(st, bs => bs.map(b => {
+        if (!st.selectedIds.includes(b.id)) return b
+        switch (axis) {
+          case 'left': return { ...b, x: minX }
+          case 'center': return { ...b, x: cX - b.width / 2 }
+          case 'right': return { ...b, x: maxX - b.width }
+          case 'top': return { ...b, y: minY }
+          case 'middle': return { ...b, y: cY - b.height / 2 }
+          case 'bottom': return { ...b, y: maxY - b.height }
+          default: return b
+        }
+      }))
+    })
+  },
+
+  // ── Design tokens ──
+  addColorToken: (name, value) => set(s => ({ tokens: { ...s.tokens, colors: [...s.tokens.colors, { id: rid('col'), name: name || 'Couleur', value }] } })),
+  updateColorToken: (id, changes) => set(s => ({ tokens: { ...s.tokens, colors: s.tokens.colors.map(c => c.id === id ? { ...c, ...changes } : c) } })),
+  deleteColorToken: (id) => set(s => ({ tokens: { ...s.tokens, colors: s.tokens.colors.filter(c => c.id !== id) } })),
+
+  addTextStyle: (style) => set(s => ({ tokens: { ...s.tokens, textStyles: [...s.tokens.textStyles, { id: rid('txt'), ...style }] } })),
+  updateTextStyle: (id, changes) => set(s => ({ tokens: { ...s.tokens, textStyles: s.tokens.textStyles.map(t => t.id === id ? { ...t, ...changes } : t) } })),
+  deleteTextStyle: (id) => set(s => ({ tokens: { ...s.tokens, textStyles: s.tokens.textStyles.filter(t => t.id !== id) } })),
+  applyTextStyle: (blockId, styleId, parentId) => {
+    const s = get()
+    const ts = s.tokens.textStyles.find(t => t.id === styleId)
+    if (!ts) return
+    get().pushHistory('prop')
+    const found = findBlock(currentBlocks(s), blockId)
+    const merged = { ...(found?.block.style || {}), fontSize: ts.fontSize, fontWeight: ts.fontWeight, lineHeight: ts.lineHeight, color: ts.color, fontFamily: ts.fontFamily }
+    set(st => patchScreens(st, bs => updateInTree(bs, blockId, { style: merged }, parentId)))
+  },
+
+  // ── Composants réutilisables ──
+  saveSelectionAsComponent: (name) => {
+    const s = get()
+    const blocks = currentBlocks(s)
+    const sel = s.selectedIds.map(id => blocks.find(b => b.id === id)).filter(Boolean) as Block[]
+    if (!sel.length) return
+    let root: Block
+    if (sel.length === 1) { root = cloneBlock(sel[0]); root.x = 0; root.y = 0 }
+    else {
+      const minX = Math.min(...sel.map(b => b.x)), minY = Math.min(...sel.map(b => b.y))
+      const maxX = Math.max(...sel.map(b => b.x + b.width)), maxY = Math.max(...sel.map(b => b.y + b.height))
+      root = {
+        id: rid('b'), kind: 'section', x: 0, y: 0, width: maxX - minX, height: maxY - minY,
+        style: {}, visible: true, locked: false,
+        children: sel.map(b => { const c = cloneBlock(b); c.x = b.x - minX; c.y = b.y - minY; return c }),
+      }
+    }
+    set({ components: [...s.components, { id: rid('cmp'), name: name?.trim() || 'Composant', root }] })
+  },
+
+  insertComponent: (id) => {
+    get().pushHistory()
+    const s = get()
+    const comp = s.components.find(c => c.id === id)
+    if (!comp) return
+    const root = cloneBlock(comp.root); root.x = 80; root.y = 80
+    set(st => ({ ...patchScreens(st, bs => [...bs, root]), selectedIds: [root.id], leftTab: 'layers' }))
+  },
+
+  deleteComponent: (id) => set(s => ({ components: s.components.filter(c => c.id !== id) })),
+  renameComponent: (id, name) => set(s => ({ components: s.components.map(c => c.id === id ? { ...c, name } : c) })),
+
+  // ── Vue ──
+  setZoom: (zoom) => set({ zoom }),
+  setPan: (panX, panY) => set({ panX, panY }),
+  zoomToFit: () => set(s => {
+    const screen = s.screens.find(scr => scr.id === s.currentScreenId)
+    const blocks = screen?.blocks ?? []
+    const rects = [
+      ...(screen ? [{ x: 0, y: 0, width: screen.width, height: screen.height }] : []),
+      ...blocks.flatMap(b => b.children ? [b, ...b.children.map(c => ({ ...c, x: b.x + c.x, y: b.y + c.y }))] : [b]),
+    ]
+    if (!rects.length) return { zoom: 0.6, panX: 60, panY: 40 }
+    const minX = Math.min(...rects.map(b => b.x)), maxX = Math.max(...rects.map(b => b.x + b.width))
+    const minY = Math.min(...rects.map(b => b.y)), maxY = Math.max(...rects.map(b => b.y + b.height))
+    const contentW = maxX - minX + 80, contentH = maxY - minY + 80
+    const viewW = 900, viewH = 700
+    const zoom = Math.min(0.95, Math.min(viewW / contentW, viewH / contentH))
+    return { zoom, panX: (viewW - contentW * zoom) / 2 - minX * zoom + 40, panY: 40 - minY * zoom + 40 }
+  }),
+
+  // ── Présentation ──
+  setPresenting: (presenting) => set({ presenting }),
+
+  // ── UI ──
+  setLeftTab: (leftTab) => set({ leftTab }),
+  setImportMode: (importMode) => set({ importMode }),
+  setStatus: (status, err) => set({ status, error: err || null }),
+
+  // ── Claude ──
+  addMessage: (m) => set(s => ({ messages: [...s.messages, m] })),
+  clearMessages: () => set({ messages: [] }),
+  setClaudeLoading: (claudeLoading) => set({ claudeLoading }),
+}))

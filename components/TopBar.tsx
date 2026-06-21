@@ -1,15 +1,17 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from 'lucide-react'
+import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, Play } from 'lucide-react'
 import { useStore } from '@/lib/store'
-import { parseHTMLToBlocks, makeFullPageDemo } from '@/lib/blocks-library'
+import { parseHTMLToBlocks, makeFullPageDemo, importedToScreen } from '@/lib/blocks-library'
 
 export default function TopBar() {
-  const { projectName, setProjectName, screens, currentScreenId, selectedIds, zoom, setZoom, setPan,
+  const { projectName, setProjectName, screens, currentScreenId, tokens, components, selectedIds, zoom, setZoom, setPan,
     zoomToFit, newProject, deleteSelected, duplicateSelected, alignBlocks,
     addBlocks, addScreenWithBlocks, loadProject, undo, redo, past, future,
+    goToDashboard, setPresenting,
     setStatus, status, error, importMode, setImportMode } = useStore()
-  const blocks = screens.find(s => s.id === currentScreenId)?.blocks ?? []
+  const currentScreen = screens.find(s => s.id === currentScreenId)
+  const blocks = currentScreen?.blocks ?? []
 
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -31,26 +33,12 @@ export default function TopBar() {
       const res = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      // Convertir les sections importées en blocs
-      const imported = (data.sections || []).map((s: Record<string, unknown>) => ({
-        id: `imp-${s.id}`, kind: 'section' as const,
-        x: 0, y: s.y as number || 0,
-        width: 1200, height: s.height as number || 200,
-        style: { backgroundColor: '#12121a' },
-        visible: true, locked: false,
-        children: (s.blocks as Record<string, unknown>[] || []).map((b: Record<string, unknown>) => ({
-          id: `imp-b-${b.id}`, kind: (b.type || 'text') as 'text',
-          x: b.x as number || 0, y: b.y as number || 0,
-          width: b.width as number || 200, height: b.height as number || 40,
-          text: b.text as string || '',
-          style: { fontSize: (b.styles as Record<string, number>)?.fontSize || 14, color: '#e2e2f0' },
-          visible: true, locked: false,
-        })),
-      }))
+      // Convertir les sections extraites en blocs éditables (types, styles réels, images)
+      const { blocks: imported, width, height } = importedToScreen(data.sections || [])
       let host = url
       try { host = new URL(url).hostname.replace(/^www\./, '') } catch {}
-      if (imported.length) addScreenWithBlocks(host, imported)
-      else addScreenWithBlocks(host, [{ id: 'imp-img', kind: 'image', x: 60, y: 60, width: 900, height: 500, src: data.fullScreenshot || '', alt: url, style: { borderRadius: 8 }, visible: true, locked: false }])
+      if (imported.length) addScreenWithBlocks(host, imported, { width, height })
+      else addScreenWithBlocks(host, [{ id: 'imp-img', kind: 'image', x: 60, y: 60, width: 900, height: 500, src: data.fullScreenshot || '', alt: url, style: { borderRadius: 8 }, visible: true, locked: false }], { width: 1020, height: 620 })
       setStatus('idle')
     } catch (e: unknown) { setStatus('error', e instanceof Error ? e.message : 'Erreur') }
   }
@@ -92,7 +80,7 @@ export default function TopBar() {
 
   // ─── Export JSON ─────────────────────────────────────────────────────────
   const exportJSON = () => {
-    const data = JSON.stringify({ projectName, screens, version: 1, exportedAt: new Date().toISOString() }, null, 2)
+    const data = JSON.stringify({ projectName, screens, tokens, components, version: 2, exportedAt: new Date().toISOString() }, null, 2)
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
     a.download = `${projectName.replace(/\s+/g, '-').toLowerCase()}.json`
@@ -114,7 +102,7 @@ export default function TopBar() {
   // ─── Export HTML ─────────────────────────────────────────────────────────
   const exportHTML = async () => {
     setExportOpen(false)
-    const res = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks, projectName }) })
+    const res = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks, projectName, tokens, background: currentScreen?.background }) })
     const { html } = await res.json()
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
@@ -142,12 +130,15 @@ export default function TopBar() {
   return (
     <div style={{ height: 48, background: 'var(--panel)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', flexShrink: 0, zIndex: 100, position: 'relative' }}>
 
-      {/* Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginRight: 4, flexShrink: 0 }}>
+      {/* Logo + projets */}
+      <button className="btn-icon" title="Mes projets" onClick={goToDashboard} style={{ marginRight: 2, flexShrink: 0 }}>
         <div style={{ width: 26, height: 26, background: 'linear-gradient(135deg, #7c6af7, #a855f7)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Sparkles size={13} color="#fff" />
         </div>
-      </div>
+      </button>
+      <button className="btn btn-ghost" onClick={goToDashboard} title="Mes projets" style={{ flexShrink: 0 }}>
+        <LayoutGrid size={13} /> Projets
+      </button>
 
       {/* Nom du projet */}
       <input ref={nameRef} className="input" style={{ width: 140, fontSize: 12, fontWeight: 500, background: 'transparent', border: '1px solid transparent', cursor: 'text' }}
@@ -265,6 +256,13 @@ export default function TopBar() {
         onClick={() => { setZoom(1); setPan(60, 40) }}>{Math.round(zoom * 100)}%</button>
       <button className="btn-icon" onClick={() => setZoom(Math.min(3, zoom * 1.18))}><ZoomIn size={13}/></button>
       <button className="btn-icon" title="Ajuster à l'écran" onClick={zoomToFit}><Maximize2 size={13}/></button>
+
+      <div className="divider" />
+
+      {/* ── Présenter ── */}
+      <button className="btn btn-ghost" title="Mode présentation" onClick={() => setPresenting(true)}>
+        <Play size={13} /> Présenter
+      </button>
 
       <div className="divider" />
 
