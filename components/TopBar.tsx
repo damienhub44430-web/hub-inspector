@@ -1,16 +1,24 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from 'lucide-react'
+import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, Play, Share2, Check, Group, Ungroup } from 'lucide-react'
 import { useStore } from '@/lib/store'
-import { parseHTMLToBlocks, makeFullPageDemo } from '@/lib/blocks-library'
+import { parseHTMLToBlocks, makeFullPageDemo, importedToScreen } from '@/lib/blocks-library'
+import { SCAN_SNIPPET } from '@/lib/scanSnippet'
 
 export default function TopBar() {
-  const { projectName, setProjectName, blocks, selectedIds, zoom, setZoom, setPan,
+  const { projectName, setProjectName, screens, currentScreenId, tokens, components, selectedIds, zoom, setZoom, setPan,
     zoomToFit, newProject, deleteSelected, duplicateSelected, alignBlocks,
-    addBlocks, setStatus, status, error, importMode, setImportMode, clearSelection } = useStore()
+    groupSelected, ungroupSelected,
+    addBlocks, addScreenWithBlocks, loadProject, undo, redo, past, future,
+    goToDashboard, setPresenting,
+    setStatus, status, error, importMode, setImportMode } = useStore()
+  const currentScreen = screens.find(s => s.id === currentScreenId)
+  const blocks = currentScreen?.blocks ?? []
 
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [shareUrl, setShareUrl] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
   const [urlVal, setUrlVal] = useState('')
   const [htmlVal, setHtmlVal] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -29,24 +37,12 @@ export default function TopBar() {
       const res = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      // Convertir les sections importées en blocs
-      const imported = (data.sections || []).map((s: Record<string, unknown>) => ({
-        id: `imp-${s.id}`, kind: 'section' as const,
-        x: 0, y: s.y as number || 0,
-        width: 1200, height: s.height as number || 200,
-        style: { backgroundColor: '#12121a' },
-        visible: true, locked: false,
-        children: (s.blocks as Record<string, unknown>[] || []).map((b: Record<string, unknown>) => ({
-          id: `imp-b-${b.id}`, kind: (b.type || 'text') as 'text',
-          x: b.x as number || 0, y: b.y as number || 0,
-          width: b.width as number || 200, height: b.height as number || 40,
-          text: b.text as string || '',
-          style: { fontSize: (b.styles as Record<string, number>)?.fontSize || 14, color: '#e2e2f0' },
-          visible: true, locked: false,
-        })),
-      }))
-      if (imported.length) addBlocks(imported)
-      else addBlocks([{ id: 'imp-img', kind: 'image', x: 60, y: 60, width: 900, height: 500, src: data.fullScreenshot || '', alt: url, style: { borderRadius: 8 }, visible: true, locked: false }])
+      // Convertir les sections extraites en blocs éditables (types, styles réels, images)
+      const { blocks: imported, width, height } = importedToScreen(data.sections || [])
+      let host = url
+      try { host = new URL(url).hostname.replace(/^www\./, '') } catch {}
+      if (imported.length) addScreenWithBlocks(host, imported, { width, height })
+      else addScreenWithBlocks(host, [{ id: 'imp-img', kind: 'image', x: 60, y: 60, width: 900, height: 500, src: data.fullScreenshot || '', alt: url, style: { borderRadius: 8 }, visible: true, locked: false }], { width: 1020, height: 620 })
       setStatus('idle')
     } catch (e: unknown) { setStatus('error', e instanceof Error ? e.message : 'Erreur') }
   }
@@ -88,7 +84,7 @@ export default function TopBar() {
 
   // ─── Export JSON ─────────────────────────────────────────────────────────
   const exportJSON = () => {
-    const data = JSON.stringify({ projectName, blocks, exportedAt: new Date().toISOString() }, null, 2)
+    const data = JSON.stringify({ projectName, screens, tokens, components, version: 2, exportedAt: new Date().toISOString() }, null, 2)
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
     a.download = `${projectName.replace(/\s+/g, '-').toLowerCase()}.json`
@@ -110,11 +106,25 @@ export default function TopBar() {
   // ─── Export HTML ─────────────────────────────────────────────────────────
   const exportHTML = async () => {
     setExportOpen(false)
-    const res = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks, projectName }) })
+    const res = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks, projectName, tokens, background: currentScreen?.background }) })
     const { html } = await res.json()
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
     a.download = `${projectName.replace(/\s+/g, '-')}.html`; a.click()
+  }
+
+  // ─── Partage (lien prototype lecture seule) ──────────────────────────────
+  const share = async () => {
+    setSharing(true)
+    try {
+      const res = await fetch('/api/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectName, screens, tokens }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      const url = `${window.location.origin}/p/${data.sessionId}`
+      setShareUrl(url)
+      try { await navigator.clipboard.writeText(url) } catch {}
+    } catch (e: unknown) { setStatus('error', e instanceof Error ? e.message : 'Partage impossible') }
+    finally { setSharing(false) }
   }
 
   // ─── Import JSON ─────────────────────────────────────────────────────────
@@ -124,7 +134,9 @@ export default function TopBar() {
     reader.onload = ev => {
       try {
         const data = JSON.parse(ev.target?.result as string)
-        if (data.blocks) addBlocks(data.blocks)
+        if (Array.isArray(data.screens)) loadProject(data.projectName, data.screens)
+        else if (Array.isArray(data.blocks)) addBlocks(data.blocks) // rétro-compat ancien format
+        else setStatus('error', 'Fichier JSON non reconnu')
       } catch { setStatus('error', 'Fichier JSON invalide') }
     }
     reader.readAsText(file); setImportMode(null)
@@ -136,18 +148,27 @@ export default function TopBar() {
   return (
     <div style={{ height: 48, background: 'var(--panel)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', flexShrink: 0, zIndex: 100, position: 'relative' }}>
 
-      {/* Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginRight: 4, flexShrink: 0 }}>
+      {/* Logo + projets */}
+      <button className="btn-icon" title="Mes projets" onClick={goToDashboard} style={{ marginRight: 2, flexShrink: 0 }}>
         <div style={{ width: 26, height: 26, background: 'linear-gradient(135deg, #7c6af7, #a855f7)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Sparkles size={13} color="#fff" />
         </div>
-      </div>
+      </button>
+      <button className="btn btn-ghost" onClick={goToDashboard} title="Mes projets" style={{ flexShrink: 0 }}>
+        <LayoutGrid size={13} /> Projets
+      </button>
 
       {/* Nom du projet */}
       <input ref={nameRef} className="input" style={{ width: 140, fontSize: 12, fontWeight: 500, background: 'transparent', border: '1px solid transparent', cursor: 'text' }}
         value={projectName} onChange={e => setProjectName(e.target.value)}
         onFocus={e => (e.target as HTMLInputElement).select()}
       />
+
+      <div className="divider" />
+
+      {/* ── Undo / Redo ── */}
+      <button className="btn-icon" title="Annuler (Ctrl+Z)" onClick={undo} disabled={!past.length} style={{ opacity: past.length ? 1 : 0.3 }}><Undo2 size={14} /></button>
+      <button className="btn-icon" title="Rétablir (Ctrl+Shift+Z)" onClick={redo} disabled={!future.length} style={{ opacity: future.length ? 1 : 0.3 }}><Redo2 size={14} /></button>
 
       <div className="divider" />
 
@@ -168,7 +189,7 @@ export default function TopBar() {
               { icon: <FileText size={12}/>, label: 'Session JSON', action: () => { const i = document.createElement('input'); i.type='file'; i.accept='.json'; i.onchange=(e)=>importJSON(e as unknown as React.ChangeEvent<HTMLInputElement>); i.click(); setImportOpen(false) } },
               { icon: <ImageIcon size={12}/>, label: 'Image', action: () => { imgRef.current?.click(); setImportOpen(false) } },
               null,
-              { icon: <Terminal size={12}/>, label: 'Via CLI', action: () => { setImportMode('cli'); setImportOpen(false) } },
+              { icon: <Terminal size={12}/>, label: 'Depuis ton app (scan)', action: () => { setImportMode('cli'); setImportOpen(false) } },
             ].map((item, i) =>
               item === null ? <div key={i} style={{ height: 1, background: 'var(--border)', margin: '3px 0' }} /> : (
                 <button key={item.label} onClick={item.action}
@@ -206,10 +227,28 @@ export default function TopBar() {
       )}
 
       {importMode === 'cli' && (
-        <div className="fadein" style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 12px' }}>
-          <Terminal size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          <code style={{ fontSize: 11, color: 'var(--dim)' }}>hub-inspector scan --url http://localhost:3000 --app-dir ./app</code>
-          <button className="btn-icon" onClick={() => setImportMode(null)}>✕</button>
+        <div className="fadein" style={{ position: 'absolute', top: 52, left: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, zIndex: 200, width: 460, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+            <Terminal size={13} style={{ color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Importer ton app locale</span>
+            <div style={{ flex: 1 }} />
+            <button className="btn-icon" onClick={() => setImportMode(null)}>✕</button>
+          </div>
+          <ol style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.7, paddingLeft: 18, margin: '0 0 10px' }}>
+            <li>Lance ton app (ex&nbsp;: <code style={{ color: 'var(--text)' }}>npm run dev</code>) et ouvre-la dans ton navigateur.</li>
+            <li>Ouvre la console (<b>F12</b> → onglet Console).</li>
+            <li><b>Copie</b> le script ci-dessous, colle-le dans la console, Entrée.</li>
+            <li>Un fichier <code style={{ color: 'var(--text)' }}>hub-scan.json</code> se télécharge.</li>
+            <li>Réimporte-le ici via <b>Importer → Session JSON</b>.</li>
+          </ol>
+          <textarea className="input" readOnly rows={4} value={SCAN_SNIPPET} onFocus={e => (e.target as HTMLTextAreaElement).select()} style={{ fontFamily: 'monospace', fontSize: 9, lineHeight: 1.4 }} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button className="btn btn-primary" onClick={() => { navigator.clipboard.writeText(SCAN_SNIPPET); setStatus('idle') }}><Copy size={12} /> Copier le script</button>
+            <button className="btn btn-ghost" onClick={() => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([SCAN_SNIPPET], { type: 'text/javascript' })); a.download = 'hub-scan.js'; a.click() }}><Download size={12} /> Télécharger .js</button>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.75 }}>
+            100% local : aucune donnée n'est envoyée, le script lit le rendu de ta page (positions, styles, textes, images).
+          </div>
         </div>
       )}
 
@@ -226,13 +265,15 @@ export default function TopBar() {
       {/* ── Outils sélection ── */}
       {hasSel && (
         <>
-          <button className="btn-icon" title="Dupliquer" onClick={duplicateSelected}><Copy size={13}/></button>
+          <button className="btn-icon" title="Dupliquer (Ctrl+D)" onClick={duplicateSelected}><Copy size={13}/></button>
+          <button className="btn-icon" title="Dégrouper (Ctrl+Shift+G)" onClick={ungroupSelected}><Ungroup size={13}/></button>
           <button className="btn-icon" title="Supprimer" onClick={deleteSelected} style={{ color: 'var(--error)' }}><Trash2 size={13}/></button>
           <div className="divider" />
         </>
       )}
       {hasMulti && (
         <>
+          <button className="btn-icon" title="Grouper (Ctrl+G)" onClick={groupSelected}><Group size={13}/></button>
           {[
             ['left', <AlignLeft size={13}/>,'Aligner à gauche'],
             ['center', <AlignCenter size={13}/>,'Centrer horizontalement'],
@@ -253,6 +294,33 @@ export default function TopBar() {
         onClick={() => { setZoom(1); setPan(60, 40) }}>{Math.round(zoom * 100)}%</button>
       <button className="btn-icon" onClick={() => setZoom(Math.min(3, zoom * 1.18))}><ZoomIn size={13}/></button>
       <button className="btn-icon" title="Ajuster à l'écran" onClick={zoomToFit}><Maximize2 size={13}/></button>
+
+      <div className="divider" />
+
+      {/* ── Présenter ── */}
+      <button className="btn btn-ghost" title="Mode présentation" onClick={() => setPresenting(true)}>
+        <Play size={13} /> Présenter
+      </button>
+
+      {/* ── Partager ── */}
+      <div style={{ position: 'relative' }}>
+        <button className="btn btn-ghost" title="Lien de prototype partageable" onClick={share} disabled={sharing}>
+          {sharing ? <Loader size={13} className="spin" /> : <Share2 size={13} />} Partager
+        </button>
+        {shareUrl && (
+          <div className="fadein" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, zIndex: 300, width: 320, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+            <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Check size={12} style={{ color: 'var(--success)' }} /> Lien copié — prototype en lecture seule
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input className="input input-sm" readOnly value={shareUrl} onFocus={e => (e.target as HTMLInputElement).select()} style={{ fontSize: 10 }} />
+              <button className="btn-icon" title="Copier" onClick={() => navigator.clipboard.writeText(shareUrl)}><Copy size={12} /></button>
+              <button className="btn-icon" title="Fermer" onClick={() => setShareUrl(null)}>✕</button>
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 7, opacity: 0.75 }}>Valable tant que le serveur reste actif (proto).</div>
+          </div>
+        )}
+      </div>
 
       <div className="divider" />
 

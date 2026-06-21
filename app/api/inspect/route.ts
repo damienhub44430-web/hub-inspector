@@ -60,7 +60,8 @@ const DOM_EXTRACT_SCRIPT = `
       if (['H1','H2','H3','H4','P','LI','BUTTON','A','LABEL','BLOCKQUOTE'].includes(tag)) {
         text = (el.innerText || el.textContent || '').trim().slice(0, 200)
       }
-      if (tag === 'IMG') text = el.getAttribute('alt') || ''
+      let src = ''
+      if (tag === 'IMG') { text = el.getAttribute('alt') || ''; src = el.currentSrc || el.getAttribute('src') || '' }
 
       // Classes CSS utiles (pour détecter le type sémantique)
       const classes = el.className && typeof el.className === 'string'
@@ -80,6 +81,7 @@ const DOM_EXTRACT_SCRIPT = `
         tag,
         type,
         text,
+        src,
         classes,
         x: Math.round(absLeft),
         y: Math.round(absTop),
@@ -182,6 +184,11 @@ async function extractViaFallback(url: string): Promise<{
   const mediaType = imgRes.headers.get('content-type') || 'image/jpeg'
   const screenshotDataUrl = `data:${mediaType};base64,${imgB64}`
 
+  // Sans clé Anthropic : mode capture seule (le screenshot devient une image éditable)
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return { elements: [], pageWidth, pageHeight, screenshot: screenshotDataUrl }
+  }
+
   // Claude Vision pour détecter les blocs
   const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -252,6 +259,7 @@ interface DomElement {
   tag: string
   type: string
   text: string
+  src?: string
   classes?: string
   x: number; y: number; w: number; h: number
   styles?: { bgColor?: string; color?: string; fontSize?: number; fontWeight?: string }
@@ -283,6 +291,7 @@ function groupIntoSections(elements: DomElement[], pageHeight: number) {
              content:'Contenu', footer:'Footer', section:'Section', unknown:'Section' }[band.type] || `Section ${i+1}`,
     y: band.y,
     height: band.h,
+    bg: (band as DomElement).styles?.bgColor,
     color: SECTION_COLORS[band.type] || SECTION_COLORS.unknown,
     // Éléments fils appartenant à cette section
     children: sorted.filter(el =>
@@ -322,6 +331,19 @@ export async function POST(req: NextRequest) {
 
     const { elements, pageWidth, pageHeight, screenshot } = extracted
 
+    // Mode capture seule (pas de clé/Vision, ou aucun élément détecté) :
+    // on renvoie le screenshot, le client l'importe comme image éditable.
+    if (!elements.length) {
+      return NextResponse.json({
+        url: cleanUrl,
+        fullScreenshot: screenshot,
+        pageWidth, pageHeight,
+        sections: [],
+        extractionSource: extractionSource === 'browserless' ? 'browserless-empty' : 'screenshot-only',
+        analyzedAt: new Date().toISOString(),
+      })
+    }
+
     // Regrouper en sections
     const sections = groupIntoSections(elements, pageHeight)
 
@@ -334,6 +356,7 @@ export async function POST(req: NextRequest) {
       type: sec.type,
       label: sec.label,
       color: sec.color,
+      background: sec.bg,
       // Position canvas
       x: 0,
       y: Math.round(sec.y * scale),
@@ -355,6 +378,7 @@ export async function POST(req: NextRequest) {
         tag: el.tag,
         type: el.type,
         text: el.text,
+        src: el.src || '',
         // Position relative à la section, scalée
         x: Math.round(el.x * scale),
         y: Math.round((el.y - sec.y) * scale),

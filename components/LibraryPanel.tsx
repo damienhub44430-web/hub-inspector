@@ -1,17 +1,23 @@
 'use client'
 import { useState } from 'react'
-import { Eye, EyeOff, Lock, Unlock, ChevronRight, ChevronDown, Layers, BookOpen, Trash2, Copy } from 'lucide-react'
+import { Eye, EyeOff, Lock, Unlock, ChevronRight, ChevronDown, Layers, BookOpen, Palette, Trash2, Copy } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { LIBRARY } from '@/lib/blocks-library'
-import type { Block } from '@/lib/types'
+import DesignPanel from './DesignPanel'
+import type { Block, LeftTab } from '@/lib/types'
 
 // ─── Panel Calques ────────────────────────────────────────────────────────
 
+// Bloc en cours de glissement (partagé entre les lignes)
+let draggedLayerId: string | null = null
+
 function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
-  const { selectedIds, select, updateBlock, deleteSelected } = useStore()
+  const { selectedIds, select, updateBlock, pushHistory, reorderSiblings } = useStore()
   const [open, setOpen] = useState(true)
+  const [dragOver, setDragOver] = useState(false)
   const isSel = selectedIds.includes(block.id)
   const hasChildren = (block.children?.length || 0) > 0
+  const isInstance = !!block.componentId
 
   const kindColors: Record<string, string> = {
     heading: '#7c6af7', text: '#60a5fa', button: '#f59e0b', image: '#f472b6',
@@ -31,13 +37,19 @@ function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
     <div>
       <div
         onClick={() => select(block.id, false)}
+        draggable
+        onDragStart={e => { e.stopPropagation(); draggedLayerId = block.id; e.dataTransfer.effectAllowed = 'move' }}
+        onDragOver={e => { e.preventDefault(); if (draggedLayerId && draggedLayerId !== block.id) setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); e.stopPropagation(); setDragOver(false); if (draggedLayerId && draggedLayerId !== block.id) reorderSiblings(draggedLayerId, block.id); draggedLayerId = null }}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: `5px 8px 5px ${8 + depth * 14}px`,
           cursor: 'pointer', borderRadius: 5, margin: '1px 4px',
           background: isSel ? `${color}18` : 'transparent',
           border: `1px solid ${isSel ? color + '44' : 'transparent'}`,
-          transition: 'all 0.1s',
+          borderTop: dragOver ? '2px solid var(--accent)' : undefined,
+          transition: 'background 0.1s',
         }}
         onMouseEnter={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = 'var(--card)' }}
         onMouseLeave={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
@@ -48,8 +60,8 @@ function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
           </button>
         ) : <span style={{ width: 14 }} />}
 
-        <div style={{ width: 18, height: 18, borderRadius: 4, background: `${color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color, flexShrink: 0, fontWeight: 700 }}>
-          {kindIcons[block.kind] || '·'}
+        <div title={isInstance ? 'Instance de composant' : block.kind} style={{ width: 18, height: 18, borderRadius: 4, background: isInstance ? 'rgba(124,106,247,0.18)' : `${color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: isInstance ? 'var(--accent)' : color, flexShrink: 0, fontWeight: 700 }}>
+          {isInstance ? '◇' : (kindIcons[block.kind] || '·')}
         </div>
 
         <span style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: block.visible !== false ? 'var(--text)' : 'var(--muted)', opacity: block.locked ? 0.5 : 1 }}>
@@ -57,10 +69,10 @@ function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
         </span>
 
         <div style={{ display: 'flex', gap: 1, opacity: 0, transition: 'opacity 0.1s' }} className="layer-actions">
-          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); updateBlock(block.id, { visible: block.visible === false ? true : false }) }}>
+          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); pushHistory('layer'); updateBlock(block.id, { visible: block.visible === false ? true : false }) }}>
             {block.visible === false ? <EyeOff size={10}/> : <Eye size={10}/>}
           </button>
-          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); updateBlock(block.id, { locked: !block.locked }) }}>
+          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); pushHistory('layer'); updateBlock(block.id, { locked: !block.locked }) }}>
             {block.locked ? <Lock size={10}/> : <Unlock size={10}/>}
           </button>
         </div>
@@ -119,7 +131,8 @@ function LibraryItem({ item }: { item: typeof LIBRARY[0] }) {
 // ─── Panel principal ──────────────────────────────────────────────────────
 
 export default function LibraryPanel() {
-  const { blocks, selectedIds, leftTab, setLeftTab, deleteSelected, duplicateSelected } = useStore()
+  const { screens, currentScreenId, selectedIds, leftTab, setLeftTab, deleteSelected, duplicateSelected } = useStore()
+  const blocks = screens.find(s => s.id === currentScreenId)?.blocks ?? []
   const [libFilter, setLibFilter] = useState<'tous'|'primitif'|'composant'>('tous')
 
   const primitives = LIBRARY.filter(i => i.category === 'primitif')
@@ -129,10 +142,14 @@ export default function LibraryPanel() {
   return (
     <div className="panel" style={{ width: 220 }}>
       {/* Tabs */}
-      <div className="panel-header" style={{ gap: 4 }}>
-        {(['layers', 'library'] as const).map(tab => (
-          <button key={tab} className={`tab ${leftTab === tab ? 'active' : ''}`} onClick={() => setLeftTab(tab)}>
-            {tab === 'layers' ? <><Layers size={11}/> Calques</> : <><BookOpen size={11}/> Blocs</>}
+      <div className="panel-header" style={{ gap: 2 }}>
+        {([
+          ['layers', <Layers key="l" size={11} />, 'Calques'],
+          ['library', <BookOpen key="b" size={11} />, 'Blocs'],
+          ['design', <Palette key="d" size={11} />, 'Design'],
+        ] as [LeftTab, React.ReactNode, string][]).map(([tab, icon, label]) => (
+          <button key={tab} className={`tab ${leftTab === tab ? 'active' : ''}`} onClick={() => setLeftTab(tab)} style={{ padding: '4px 8px' }}>
+            {icon} {label}
           </button>
         ))}
         {leftTab === 'layers' && selectedIds.length > 0 && (
@@ -144,7 +161,9 @@ export default function LibraryPanel() {
         )}
       </div>
 
-      {leftTab === 'layers' ? (
+      {leftTab === 'design' ? (
+        <DesignPanel />
+      ) : leftTab === 'layers' ? (
         <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
           <style>{`.layer-actions { opacity: 0 } *:hover > .layer-actions { opacity: 1 }`}</style>
           {!blocks.length ? (

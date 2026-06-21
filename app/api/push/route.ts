@@ -6,7 +6,7 @@ function cleanup() { const now = Date.now(); for (const [k, v] of sessions) if (
 export async function POST(req: NextRequest) {
   cleanup()
   const body = await req.json()
-  if (!body.blocks && !body.sections) return NextResponse.json({ error: 'blocks requis' }, { status: 400 })
+  if (!body.blocks && !body.sections && !body.screens) return NextResponse.json({ error: 'screens requis' }, { status: 400 })
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   sessions.set(id, { data: body, createdAt: Date.now() })
   return NextResponse.json({ sessionId: id, sessionUrl: `/?session=${id}` })
