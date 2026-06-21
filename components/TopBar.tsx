@@ -1,13 +1,15 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from 'lucide-react'
+import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { parseHTMLToBlocks, makeFullPageDemo } from '@/lib/blocks-library'
 
 export default function TopBar() {
-  const { projectName, setProjectName, blocks, selectedIds, zoom, setZoom, setPan,
+  const { projectName, setProjectName, screens, currentScreenId, selectedIds, zoom, setZoom, setPan,
     zoomToFit, newProject, deleteSelected, duplicateSelected, alignBlocks,
-    addBlocks, setStatus, status, error, importMode, setImportMode, clearSelection } = useStore()
+    addBlocks, addScreenWithBlocks, loadProject, undo, redo, past, future,
+    setStatus, status, error, importMode, setImportMode } = useStore()
+  const blocks = screens.find(s => s.id === currentScreenId)?.blocks ?? []
 
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -45,8 +47,10 @@ export default function TopBar() {
           visible: true, locked: false,
         })),
       }))
-      if (imported.length) addBlocks(imported)
-      else addBlocks([{ id: 'imp-img', kind: 'image', x: 60, y: 60, width: 900, height: 500, src: data.fullScreenshot || '', alt: url, style: { borderRadius: 8 }, visible: true, locked: false }])
+      let host = url
+      try { host = new URL(url).hostname.replace(/^www\./, '') } catch {}
+      if (imported.length) addScreenWithBlocks(host, imported)
+      else addScreenWithBlocks(host, [{ id: 'imp-img', kind: 'image', x: 60, y: 60, width: 900, height: 500, src: data.fullScreenshot || '', alt: url, style: { borderRadius: 8 }, visible: true, locked: false }])
       setStatus('idle')
     } catch (e: unknown) { setStatus('error', e instanceof Error ? e.message : 'Erreur') }
   }
@@ -88,7 +92,7 @@ export default function TopBar() {
 
   // ─── Export JSON ─────────────────────────────────────────────────────────
   const exportJSON = () => {
-    const data = JSON.stringify({ projectName, blocks, exportedAt: new Date().toISOString() }, null, 2)
+    const data = JSON.stringify({ projectName, screens, version: 1, exportedAt: new Date().toISOString() }, null, 2)
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }))
     a.download = `${projectName.replace(/\s+/g, '-').toLowerCase()}.json`
@@ -124,7 +128,9 @@ export default function TopBar() {
     reader.onload = ev => {
       try {
         const data = JSON.parse(ev.target?.result as string)
-        if (data.blocks) addBlocks(data.blocks)
+        if (Array.isArray(data.screens)) loadProject(data.projectName, data.screens)
+        else if (Array.isArray(data.blocks)) addBlocks(data.blocks) // rétro-compat ancien format
+        else setStatus('error', 'Fichier JSON non reconnu')
       } catch { setStatus('error', 'Fichier JSON invalide') }
     }
     reader.readAsText(file); setImportMode(null)
@@ -148,6 +154,12 @@ export default function TopBar() {
         value={projectName} onChange={e => setProjectName(e.target.value)}
         onFocus={e => (e.target as HTMLInputElement).select()}
       />
+
+      <div className="divider" />
+
+      {/* ── Undo / Redo ── */}
+      <button className="btn-icon" title="Annuler (Ctrl+Z)" onClick={undo} disabled={!past.length} style={{ opacity: past.length ? 1 : 0.3 }}><Undo2 size={14} /></button>
+      <button className="btn-icon" title="Rétablir (Ctrl+Shift+Z)" onClick={redo} disabled={!future.length} style={{ opacity: future.length ? 1 : 0.3 }}><Redo2 size={14} /></button>
 
       <div className="divider" />
 

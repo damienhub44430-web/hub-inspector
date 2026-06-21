@@ -8,7 +8,7 @@ import type { Block } from '@/lib/types'
 // ─── Panel Calques ────────────────────────────────────────────────────────
 
 function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
-  const { selectedIds, select, updateBlock, deleteSelected } = useStore()
+  const { selectedIds, select, updateBlock, pushHistory } = useStore()
   const [open, setOpen] = useState(true)
   const isSel = selectedIds.includes(block.id)
   const hasChildren = (block.children?.length || 0) > 0
@@ -57,10 +57,10 @@ function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
         </span>
 
         <div style={{ display: 'flex', gap: 1, opacity: 0, transition: 'opacity 0.1s' }} className="layer-actions">
-          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); updateBlock(block.id, { visible: block.visible === false ? true : false }) }}>
+          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); pushHistory('layer'); updateBlock(block.id, { visible: block.visible === false ? true : false }) }}>
             {block.visible === false ? <EyeOff size={10}/> : <Eye size={10}/>}
           </button>
-          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); updateBlock(block.id, { locked: !block.locked }) }}>
+          <button className="btn-icon" style={{ padding: 2 }} onClick={e => { e.stopPropagation(); pushHistory('layer'); updateBlock(block.id, { locked: !block.locked }) }}>
             {block.locked ? <Lock size={10}/> : <Unlock size={10}/>}
           </button>
         </div>
@@ -119,7 +119,8 @@ function LibraryItem({ item }: { item: typeof LIBRARY[0] }) {
 // ─── Panel principal ──────────────────────────────────────────────────────
 
 export default function LibraryPanel() {
-  const { blocks, selectedIds, leftTab, setLeftTab, deleteSelected, duplicateSelected } = useStore()
+  const { screens, currentScreenId, selectedIds, leftTab, setLeftTab, deleteSelected, duplicateSelected } = useStore()
+  const blocks = screens.find(s => s.id === currentScreenId)?.blocks ?? []
   const [libFilter, setLibFilter] = useState<'tous'|'primitif'|'composant'>('tous')
 
   const primitives = LIBRARY.filter(i => i.category === 'primitif')

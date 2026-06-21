@@ -46,7 +46,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ─── Panel propriétés ─────────────────────────────────────────────────────
 
 export default function PropertiesPanel() {
-  const { blocks, selectedIds, messages, addMessage, clearMessages, claudeLoading, setClaudeLoading, updateBlock, updateBlockStyle } = useStore()
+  const { screens, currentScreenId, selectedIds, messages, addMessage, clearMessages, claudeLoading, setClaudeLoading, updateBlock, updateBlockStyle, updateScreen, pushHistory } = useStore()
+  const blocks = screens.find(s => s.id === currentScreenId)?.blocks ?? []
+  const currentScreen = screens.find(s => s.id === currentScreenId)
   const [input, setInput] = useState('')
 
   // Trouver le bloc sélectionné (top-level ou enfant)
@@ -65,10 +67,12 @@ export default function PropertiesPanel() {
 
   const upStyle = (style: Partial<BlockStyle>) => {
     if (!block) return
+    pushHistory('prop')
     updateBlockStyle(block.id, style, parentId)
   }
   const upBlock = (changes: Partial<Block>) => {
     if (!block) return
+    pushHistory('prop')
     updateBlock(block.id, changes, parentId)
   }
 
@@ -111,9 +115,38 @@ export default function PropertiesPanel() {
             {selectedIds.length} blocs sélectionnés
           </div>
         ) : !block ? (
-          <div style={{ padding: '16px 14px', color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>
-            Sélectionne un bloc
-          </div>
+          currentScreen ? (
+            <Section title="Écran">
+              <div>
+                <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Nom</div>
+                <input className="input input-sm" value={currentScreen.name} onChange={e => updateScreen(currentScreen.id, { name: e.target.value })} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <NumberInput label="Largeur" value={currentScreen.width} onChange={v => updateScreen(currentScreen.id, { width: Math.max(200, v) })} min={200} unit="px" />
+                <NumberInput label="Hauteur" value={currentScreen.height} onChange={v => updateScreen(currentScreen.id, { height: Math.max(200, v) })} min={200} unit="px" />
+              </div>
+              <div>
+                <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Format</div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {([['Desktop', 1440, 1024], ['Tablette', 834, 1112], ['Mobile', 390, 844]] as const).map(([lbl, w, h]) => (
+                    <button key={lbl} onClick={() => updateScreen(currentScreen.id, { width: w, height: h })}
+                      style={{ flex: 1, padding: '5px 0', borderRadius: 5, fontSize: 10, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                        background: currentScreen.width === w && currentScreen.height === h ? 'var(--accent)' : 'transparent',
+                        color: currentScreen.width === w && currentScreen.height === h ? '#fff' : 'var(--muted)',
+                        border: `1px solid ${currentScreen.width === w && currentScreen.height === h ? 'transparent' : 'var(--border)'}` }}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <ColorInput label="Fond de l'écran" value={currentScreen.background} onChange={v => updateScreen(currentScreen.id, { background: v })} />
+              <div style={{ color: 'var(--muted)', fontSize: 11, paddingTop: 4 }}>Sélectionne un bloc pour éditer son style.</div>
+            </Section>
+          ) : (
+            <div style={{ padding: '16px 14px', color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>
+              Sélectionne un bloc
+            </div>
+          )
         ) : (
           <>
             {/* Position & taille */}

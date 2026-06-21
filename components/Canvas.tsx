@@ -99,9 +99,11 @@ const HANDLES = [
 // ─── Canvas principal ─────────────────────────────────────────────────────
 export default function Canvas() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { blocks, selectedIds, editingId, zoom, panX, panY,
+  const { screens, currentScreenId, selectedIds, editingId, zoom, panX, panY,
     select, clearSelection, setEditing, setZoom, setPan,
-    updateBlock, moveBlock, addBlock } = useStore()
+    updateBlock } = useStore()
+  const screen = screens.find(s => s.id === currentScreenId)
+  const blocks = screen?.blocks ?? []
 
   const dragRef = useRef<{
     type: 'move' | 'resize'
@@ -137,11 +139,15 @@ export default function Canvas() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { deleteSelected, duplicateSelected, selectAll, blocks: bs, selectedIds: sids, zoom: z, setZoom: sz } = useStore.getState()
+      const { deleteSelected, duplicateSelected, selectAll, selectedIds: sids, zoom: z, setZoom: sz, undo, redo } = useStore.getState()
+      const k = e.key.toLowerCase()
       if (['INPUT','TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return
+      if ((e.ctrlKey || e.metaKey) && k === 'z' && e.shiftKey) { e.preventDefault(); redo(); return }
+      if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); undo(); return }
+      if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return }
       if ((e.key === 'Delete' || e.key === 'Backspace') && sids.length) { e.preventDefault(); deleteSelected() }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); duplicateSelected() }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); selectAll() }
+      if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); duplicateSelected() }
+      if ((e.ctrlKey || e.metaKey) && k === 'a') { e.preventDefault(); selectAll() }
       if (e.key === 'Escape') { useStore.getState().clearSelection(); useStore.getState().setEditing(null) }
       if (e.key === '+' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sz(Math.min(3, z * 1.2)) }
       if (e.key === '-' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sz(Math.max(0.1, z * 0.8)) }
@@ -192,7 +198,8 @@ export default function Canvas() {
         // Convertir en coordonnées monde
         const wx = (x - panX) / zoom, wy = (y - panY) / zoom
         const ww = w / zoom, wh = h / zoom
-        const { blocks: bs, select: sel } = useStore.getState()
+        const bs = useStore.getState().getBlocks()
+        const sel = useStore.getState().select
         let first = true
         bs.forEach(b => {
           const overlap = b.x < wx + ww && b.x + b.width > wx && b.y < wy + wh && b.y + b.height > wy
@@ -268,7 +275,9 @@ export default function Canvas() {
           e.stopPropagation()
           if (!block.locked) {
             select(block.id, e.shiftKey)
-            const { selectedIds: sids, blocks: bs } = useStore.getState()
+            useStore.getState().pushHistory('move')
+            const sids = useStore.getState().selectedIds
+            const bs = useStore.getState().getBlocks()
             const isMulti = sids.length > 1 && sids.includes(block.id)
             dragRef.current = {
               type: 'move',
@@ -322,6 +331,7 @@ export default function Canvas() {
             }}
             onMouseDown={(e) => {
               e.stopPropagation()
+              useStore.getState().pushHistory('resize')
               dragRef.current = {
                 type: 'resize',
                 blockId: block.id, parentId,
@@ -381,6 +391,15 @@ export default function Canvas() {
         id="canvas-world"
         style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${panX}px,${panY}px) scale(${zoom})` }}
       >
+        {/* Frame de l'écran courant (artboard) */}
+        {screen && (
+          <>
+            <div style={{ position: 'absolute', left: 0, top: -28, fontSize: 13, fontWeight: 600, color: 'var(--dim)', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+              {screen.name} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>· {screen.width}×{screen.height}</span>
+            </div>
+            <div style={{ position: 'absolute', left: 0, top: 0, width: screen.width, height: screen.height, background: screen.background, borderRadius: 3, boxShadow: '0 0 0 1px var(--border2), 0 24px 60px rgba(0,0,0,0.4)', pointerEvents: 'none' }} />
+          </>
+        )}
         {blocks.map(b => renderBlock(b))}
       </div>
 

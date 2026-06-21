@@ -56,6 +56,16 @@ export interface Block {
   importY?: number  // position Y dans la page source
 }
 
+// Un écran = une frame/artboard avec ses propres blocs et dimensions
+export interface Screen {
+  id: string
+  name: string
+  width: number
+  height: number
+  background: string
+  blocks: Block[]
+}
+
 export type ImportMode = 'url' | 'html' | 'file' | 'image' | 'cli' | null
 export type LeftTab = 'layers' | 'library'
 export type ExportFormat = 'json' | 'png' | 'html'
