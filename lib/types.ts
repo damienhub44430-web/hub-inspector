@@ -1,57 +1,66 @@
-export type SectionType = 'navbar'|'hero'|'features'|'cta'|'testimonials'|'pricing'|'faq'|'footer'|'content'|'gallery'|'form'|'section'|'unknown'
-export type BlockType = 'heading'|'text'|'cta'|'image'|'form'|'navbar'|'section'|'footer'|'unknown'
+export type BlockKind =
+  // Primitifs
+  | 'heading' | 'text' | 'button' | 'image' | 'divider' | 'spacer'
+  // Conteneurs
+  | 'section' | 'card' | 'columns'
+  // Composants pré-construits
+  | 'navbar' | 'hero' | 'features' | 'cta' | 'testimonial' | 'pricing' | 'footer' | 'form'
 
-export interface BlockStyles {
-  bgColor?: string
-  color?: string
+export interface BlockStyle {
   fontSize?: number
   fontWeight?: string
+  color?: string
+  textAlign?: 'left' | 'center' | 'right'
+  lineHeight?: number
+  fontFamily?: string
+  backgroundColor?: string
+  borderRadius?: number
+  borderWidth?: number
+  borderColor?: string
+  paddingTop?: number
+  paddingRight?: number
+  paddingBottom?: number
+  paddingLeft?: number
+  opacity?: number
+  boxShadow?: string
+  gap?: number
+  display?: string
+  flexDirection?: string
+  alignItems?: string
+  justifyContent?: string
 }
 
 export interface Block {
   id: string
-  tag: string
-  type: BlockType
-  text: string
-  // Position relative à la section (canvas px)
-  x: number; y: number; width: number; height: number
-  // Position source originale (page px)
-  srcX: number; srcY: number; srcWidth: number; srcHeight: number
-  styles: BlockStyles
+  kind: BlockKind
+  x: number
+  y: number
+  width: number
+  height: number
+  // Contenu
+  text?: string
+  src?: string
+  alt?: string
+  href?: string
+  level?: 1 | 2 | 3 | 4
+  placeholder?: string
+  // Style
+  style: BlockStyle
+  // État
   visible: boolean
-  // Édition
-  editedText?: string
-  editedStyles?: Partial<BlockStyles>
-}
-
-export interface Section {
-  id: string
-  type: SectionType
-  label: string
-  color: string
-  // Position canvas
-  x: number; y: number; width: number; height: number
-  // Source
-  srcY: number; srcHeight: number; srcWidth: number
-  clipY: number; clipH: number
-  imageUrl: string
-  content: Record<string, unknown>
-  blocks: Block[]
   locked: boolean
-  visible: boolean
-  claudeNote?: string
+  // Enfants (sections/groupes)
+  children?: Block[]
+  // Infos source (import)
+  sourceTag?: string
+  importY?: number  // position Y dans la page source
 }
 
-export interface PageInspection {
-  id: string
-  url: string
-  projectName: string
-  fullScreenshot: string
-  pageWidth: number
-  pageHeight: number
-  sections: Section[]
-  createdAt: string
-  status: 'idle'|'capturing'|'analyzing'|'done'|'error'
-  error?: string
-  extractionSource?: string
+export type ImportMode = 'url' | 'html' | 'file' | 'image' | 'cli' | null
+export type LeftTab = 'layers' | 'library'
+export type ExportFormat = 'json' | 'png' | 'html'
+
+export interface Message {
+  role: 'user' | 'assistant'
+  content: string
 }

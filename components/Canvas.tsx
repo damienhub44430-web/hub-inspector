@@ -1,342 +1,401 @@
 'use client'
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import { useStore } from '@/lib/store'
-import type { Section, Block } from '@/lib/types'
+import type { Block, BlockStyle } from '@/lib/types'
 
-const BLOCK_COLORS: Record<string, string> = {
-  heading: '#7c6af7', text: '#60a5fa', cta: '#f59e0b',
-  image: '#f472b6', form: '#34d399', unknown: '#6b7280',
-  navbar: '#22d3a0', footer: '#6b7280', section: '#94a3b8',
+// ─── Rendu d'un bloc individuel ───────────────────────────────────────────
+function styleToCSS(s: BlockStyle, extra?: React.CSSProperties): React.CSSProperties {
+  return {
+    fontSize: s.fontSize,
+    fontWeight: s.fontWeight,
+    color: s.color,
+    textAlign: s.textAlign as React.CSSProperties['textAlign'],
+    lineHeight: s.lineHeight,
+    fontFamily: s.fontFamily,
+    backgroundColor: s.backgroundColor,
+    borderRadius: s.borderRadius,
+    borderWidth: s.borderWidth,
+    borderColor: s.borderColor,
+    borderStyle: s.borderWidth ? 'solid' : undefined,
+    paddingTop: s.paddingTop,
+    paddingRight: s.paddingRight,
+    paddingBottom: s.paddingBottom,
+    paddingLeft: s.paddingLeft,
+    opacity: s.opacity,
+    boxShadow: s.boxShadow,
+    gap: s.gap,
+    display: s.display,
+    flexDirection: s.flexDirection as React.CSSProperties['flexDirection'],
+    alignItems: s.alignItems,
+    justifyContent: s.justifyContent,
+    ...extra,
+  }
 }
 
-interface Drag {
-  type: 'section'|'block'
-  sectionId: string; blockId?: string
-  startMX: number; startMY: number
-  startX: number; startY: number
-}
-interface Resize {
-  type: 'section'|'block'
-  sectionId: string; blockId?: string
-  startMX: number; startMY: number
-  startW: number; startH: number
+function BlockContent({ block, isEditing, onTextChange }: {
+  block: Block
+  isEditing: boolean
+  onTextChange: (text: string) => void
+}) {
+  const css = styleToCSS(block.style)
+
+  if (block.kind === 'image') {
+    return block.src
+      ? <img src={block.src} alt={block.alt || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: block.style.borderRadius, display: 'block' }} draggable={false} />
+      : (
+        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'var(--card2)', borderRadius: block.style.borderRadius || 8, border: '2px dashed var(--border2)', color: 'var(--muted)' }}>
+          <span style={{ fontSize: 28, opacity: 0.4 }}>🖼</span>
+          <span style={{ fontSize: 11 }}>Double-clic pour ajouter une image</span>
+        </div>
+      )
+  }
+
+  if (block.kind === 'divider') {
+    return <div style={{ width: '100%', height: '100%', backgroundColor: block.style.backgroundColor || 'var(--border2)' }} />
+  }
+
+  if (block.kind === 'spacer') {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.3 }}>
+        <span style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: '0.1em' }}>ESPACEUR</span>
+      </div>
+    )
+  }
+
+  const text = block.text || ''
+
+  if (isEditing) {
+    return (
+      <div
+        contentEditable suppressContentEditableWarning
+        onInput={e => onTextChange((e.target as HTMLElement).innerText)}
+        style={{ ...css, width: '100%', height: '100%', outline: 'none', cursor: 'text', userSelect: 'text', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+        dangerouslySetInnerHTML={{ __html: text.replace(/\n/g, '<br>') }}
+      />
+    )
+  }
+
+  return (
+    <div style={{ ...css, width: '100%', height: '100%', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'hidden' }}>
+      {block.kind === 'button' ? (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{text}</div>
+      ) : text || <span style={{ color: 'var(--muted)', opacity: 0.5 }}>{block.placeholder || 'Double-clic pour éditer'}</span>}
+    </div>
+  )
 }
 
+// ─── Handles de resize ───────────────────────────────────────────────────
+const HANDLES = [
+  { id: 'nw', cx: 0,   cy: 0,   cursor: 'nwse-resize' },
+  { id: 'n',  cx: 0.5, cy: 0,   cursor: 'ns-resize' },
+  { id: 'ne', cx: 1,   cy: 0,   cursor: 'nesw-resize' },
+  { id: 'e',  cx: 1,   cy: 0.5, cursor: 'ew-resize' },
+  { id: 'se', cx: 1,   cy: 1,   cursor: 'nwse-resize' },
+  { id: 's',  cx: 0.5, cy: 1,   cursor: 'ns-resize' },
+  { id: 'sw', cx: 0,   cy: 1,   cursor: 'nesw-resize' },
+  { id: 'w',  cx: 0,   cy: 0.5, cursor: 'ew-resize' },
+] as const
+
+// ─── Canvas principal ─────────────────────────────────────────────────────
 export default function Canvas() {
-  const ref = useRef<HTMLDivElement>(null)
-  const {
-    inspection, selectedSectionId, selectedBlockId, hoveredBlockId, zoom, panX, panY, showBlocks,
-    updateSection, updateBlock, selectSection, selectBlock, hoverBlock, setZoom, setPan,
-  } = useStore()
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { blocks, selectedIds, editingId, zoom, panX, panY,
+    select, clearSelection, setEditing, setZoom, setPan,
+    updateBlock, moveBlock, addBlock } = useStore()
 
-  const drag = useRef<Drag | null>(null)
-  const resize = useRef<Resize | null>(null)
-  const pan = useRef<{ sx: number; sy: number; spx: number; spy: number } | null>(null)
-  const editing = useRef<{ sectionId: string; blockId: string } | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editText, setEditText] = useState('')
+  const dragRef = useRef<{
+    type: 'move' | 'resize'
+    blockId: string; parentId?: string
+    startMX: number; startMY: number
+    startX: number; startY: number
+    startW: number; startH: number
+    handle?: string
+    multi?: { id: string; x: number; y: number }[]
+  } | null>(null)
+
+  const panRef = useRef<{ sx: number; sy: number; spx: number; spy: number } | null>(null)
+  const selRectRef = useRef<{ sx: number; sy: number; x: number; y: number; w: number; h: number } | null>(null)
+  const [selRect, setSelRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
 
   // Zoom molette
   const onWheel = useCallback((e: WheelEvent) => {
     e.preventDefault()
-    const rect = ref.current!.getBoundingClientRect()
+    const rect = containerRef.current!.getBoundingClientRect()
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top
     const f = e.deltaY > 0 ? 0.91 : 1.1
-    const nz = Math.min(2, Math.max(0.1, zoom * f))
+    const nz = Math.min(3, Math.max(0.08, zoom * f))
     setPan(cx - (cx - panX) * (nz / zoom), cy - (cy - panY) * (nz / zoom))
     setZoom(nz)
   }, [zoom, panX, panY, setPan, setZoom])
 
   useEffect(() => {
-    const el = ref.current
-    if (!el) return
+    const el = containerRef.current; if (!el) return
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [onWheel])
 
-  // Mouse move / up globaux
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const { deleteSelected, duplicateSelected, selectAll, blocks: bs, selectedIds: sids, zoom: z, setZoom: sz } = useStore.getState()
+      if (['INPUT','TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return
+      if ((e.key === 'Delete' || e.key === 'Backspace') && sids.length) { e.preventDefault(); deleteSelected() }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); duplicateSelected() }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); selectAll() }
+      if (e.key === 'Escape') { useStore.getState().clearSelection(); useStore.getState().setEditing(null) }
+      if (e.key === '+' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sz(Math.min(3, z * 1.2)) }
+      if (e.key === '-' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sz(Math.max(0.1, z * 0.8)) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Souris global
   useEffect(() => {
     const move = (e: MouseEvent) => {
-      if (pan.current) {
-        setPan(e.clientX - pan.current.sx + pan.current.spx, e.clientY - pan.current.sy + pan.current.spy)
+      if (panRef.current) {
+        setPan(e.clientX - panRef.current.sx + panRef.current.spx, e.clientY - panRef.current.sy + panRef.current.spy)
         return
       }
-      if (drag.current) {
-        const dx = (e.clientX - drag.current.startMX) / zoom
-        const dy = (e.clientY - drag.current.startMY) / zoom
-        if (drag.current.type === 'section') {
-          updateSection(drag.current.sectionId, { x: drag.current.startX + dx, y: drag.current.startY + dy })
-        } else if (drag.current.blockId) {
-          updateBlock(drag.current.sectionId, drag.current.blockId, {
-            x: drag.current.startX + dx, y: drag.current.startY + dy
-          })
+      if (dragRef.current) {
+        const d = dragRef.current
+        const dx = (e.clientX - d.startMX) / zoom
+        const dy = (e.clientY - d.startMY) / zoom
+        if (d.type === 'move') {
+          if (d.multi) {
+            d.multi.forEach(({ id, x, y }) => updateBlock(id, { x: x + dx, y: y + dy }))
+          } else {
+            updateBlock(d.blockId, { x: d.startX + dx, y: d.startY + dy }, d.parentId)
+          }
+        } else {
+          const h = d.handle || 'se'
+          const newW = h.includes('e') ? Math.max(40, d.startW + dx) : h.includes('w') ? Math.max(40, d.startW - dx) : d.startW
+          const newH = h.includes('s') ? Math.max(20, d.startH + dy) : h.includes('n') ? Math.max(20, d.startH - dy) : d.startH
+          const newX = h.includes('w') ? d.startX + dx : d.startX
+          const newY = h.includes('n') ? d.startY + dy : d.startY
+          updateBlock(d.blockId, { width: newW, height: newH, x: newX, y: newY }, d.parentId)
         }
         return
       }
-      if (resize.current) {
-        const dx = (e.clientX - resize.current.startMX) / zoom
-        const dy = (e.clientY - resize.current.startMY) / zoom
-        if (resize.current.type === 'section') {
-          updateSection(resize.current.sectionId, {
-            width: Math.max(200, resize.current.startW + dx),
-            height: Math.max(40, resize.current.startH + dy),
-          })
-        } else if (resize.current.blockId) {
-          updateBlock(resize.current.sectionId, resize.current.blockId, {
-            width: Math.max(40, resize.current.startW + dx),
-            height: Math.max(16, resize.current.startH + dy),
-          })
-        }
+      if (selRectRef.current) {
+        const r = containerRef.current!.getBoundingClientRect()
+        const cx = e.clientX - r.left, cy = e.clientY - r.top
+        const dx = cx - selRectRef.current.sx, dy = cy - selRectRef.current.sy
+        selRectRef.current = { ...selRectRef.current, x: dx < 0 ? cx : selRectRef.current.sx, y: dy < 0 ? cy : selRectRef.current.sy, w: Math.abs(dx), h: Math.abs(dy) }
+        setSelRect({ ...selRectRef.current })
       }
     }
-    const up = () => { drag.current = null; resize.current = null; pan.current = null }
+
+    const up = (e: MouseEvent) => {
+      if (selRectRef.current && (selRectRef.current.w > 4 || selRectRef.current.h > 4)) {
+        const { x, y, w, h } = selRectRef.current
+        // Convertir en coordonnées monde
+        const wx = (x - panX) / zoom, wy = (y - panY) / zoom
+        const ww = w / zoom, wh = h / zoom
+        const { blocks: bs, select: sel } = useStore.getState()
+        let first = true
+        bs.forEach(b => {
+          const overlap = b.x < wx + ww && b.x + b.width > wx && b.y < wy + wh && b.y + b.height > wy
+          if (overlap) { sel(b.id, !first); first = false }
+        })
+        setSelRect(null); selRectRef.current = null
+      }
+      dragRef.current = null; panRef.current = null
+      selRectRef.current = null; setSelRect(null)
+    }
+
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
-  }, [zoom, updateSection, updateBlock, setPan])
+  }, [zoom, panX, panY, updateBlock, setPan, select])
 
-  const startSectionDrag = (e: React.MouseEvent, sec: Section) => {
-    e.stopPropagation()
-    if (sec.locked || editingId) return
-    drag.current = { type: 'section', sectionId: sec.id, startMX: e.clientX, startMY: e.clientY, startX: sec.x, startY: sec.y }
-  }
-  const startBlockDrag = (e: React.MouseEvent, sec: Section, blk: Block) => {
-    e.stopPropagation()
-    if (editingId) return
-    drag.current = { type: 'block', sectionId: sec.id, blockId: blk.id, startMX: e.clientX, startMY: e.clientY, startX: blk.x, startY: blk.y }
-  }
-  const startSectionResize = (e: React.MouseEvent, sec: Section) => {
-    e.stopPropagation()
-    resize.current = { type: 'section', sectionId: sec.id, startMX: e.clientX, startMY: e.clientY, startW: sec.width, startH: sec.height }
-  }
-  const startBlockResize = (e: React.MouseEvent, sec: Section, blk: Block) => {
-    e.stopPropagation()
-    resize.current = { type: 'block', sectionId: sec.id, blockId: blk.id, startMX: e.clientX, startMY: e.clientY, startW: blk.width, startH: blk.height }
+  // Drop depuis la bibliothèque
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const kind = e.dataTransfer.getData('block-kind')
+    const { LIBRARY } = require('@/lib/blocks-library')
+    const item = LIBRARY.find((l: { kind: string }) => l.kind === kind)
+    if (!item) return
+    const rect = containerRef.current!.getBoundingClientRect()
+    const wx = (e.clientX - rect.left - panX) / zoom
+    const wy = (e.clientY - rect.top - panY) / zoom
+    const block = item.factory(Math.round(wx - 100), Math.round(wy - 40))
+    useStore.getState().addBlock(block)
   }
 
-  const startEdit = (e: React.MouseEvent, sec: Section, blk: Block) => {
-    e.stopPropagation()
-    if (!blk.text && blk.type === 'image') return
-    setEditingId(blk.id)
-    setEditText(blk.editedText ?? blk.text)
-    editing.current = { sectionId: sec.id, blockId: blk.id }
-  }
-  const commitEdit = () => {
-    if (editing.current) {
-      updateBlock(editing.current.sectionId, editing.current.blockId, { editedText: editText })
+  // Upload image sur double-clic d'un bloc image vide
+  const handleImageUpload = (blockId: string, parentId?: string) => {
+    const input = document.createElement('input')
+    input.type = 'file'; input.accept = 'image/*'
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return
+      const reader = new FileReader()
+      reader.onload = ev => updateBlock(blockId, { src: ev.target?.result as string }, parentId)
+      reader.readAsDataURL(file)
     }
-    setEditingId(null)
-    editing.current = null
+    input.click()
   }
 
-  const sections = inspection?.sections?.filter(s => s.visible !== false) || []
+  const renderBlock = (block: Block, parentId?: string, offsetX = 0, offsetY = 0) => {
+    if (!block.visible) return null
+    const isSel = selectedIds.includes(block.id)
+    const isEdit = block.id === editingId
+    const isContainer = !!block.children?.length
+
+    const baseStyle = styleToCSS(block.style)
+    const containerStyle: React.CSSProperties = {
+      ...baseStyle,
+      position: 'absolute',
+      left: block.x,
+      top: block.y,
+      width: block.width,
+      height: block.height,
+      outline: isSel ? '2px solid var(--accent)' : 'none',
+      outlineOffset: isSel ? 1 : 0,
+      boxShadow: isSel ? '0 0 0 4px rgba(124,106,247,0.15)' : undefined,
+      overflow: isContainer ? 'visible' : 'hidden',
+      cursor: block.locked ? 'default' : isEdit ? 'text' : 'move',
+      userSelect: isEdit ? 'text' : 'none',
+      zIndex: isSel ? 10 : 1,
+    }
+
+    return (
+      <div
+        key={block.id}
+        style={containerStyle}
+        onMouseDown={(e) => {
+          if (isEdit) return
+          e.stopPropagation()
+          if (!block.locked) {
+            select(block.id, e.shiftKey)
+            const { selectedIds: sids, blocks: bs } = useStore.getState()
+            const isMulti = sids.length > 1 && sids.includes(block.id)
+            dragRef.current = {
+              type: 'move',
+              blockId: block.id, parentId,
+              startMX: e.clientX, startMY: e.clientY,
+              startX: block.x, startY: block.y,
+              startW: block.width, startH: block.height,
+              multi: isMulti ? bs.filter(b => sids.includes(b.id)).map(b => ({ id: b.id, x: b.x, y: b.y })) : undefined,
+            }
+          }
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation()
+          if (block.kind === 'image' && !block.src) { handleImageUpload(block.id, parentId); return }
+          if (!block.locked) setEditing(block.id)
+        }}
+      >
+        {/* Contenu */}
+        {isContainer ? (
+          <div style={{ position: 'relative', width: '100%', height: '100%', ...styleToCSS(block.style) }}>
+            {block.children!.map(child => renderBlock(child, block.id, block.x, block.y))}
+          </div>
+        ) : (
+          <BlockContent
+            block={block}
+            isEditing={isEdit}
+            onTextChange={(text) => updateBlock(block.id, { text }, parentId)}
+          />
+        )}
+
+        {/* Label discret */}
+        {isSel && !isEdit && (
+          <div style={{ position: 'absolute', top: -20, left: 0, background: 'var(--accent)', color: '#fff', fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: '4px 4px 0 0', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+            {block.kind}{block.locked ? ' 🔒' : ''}
+          </div>
+        )}
+
+        {/* Handles resize */}
+        {isSel && !isEdit && !block.locked && HANDLES.map(h => (
+          <div key={h.id}
+            style={{
+              position: 'absolute',
+              left: `calc(${h.cx * 100}% - 5px)`,
+              top: `calc(${h.cy * 100}% - 5px)`,
+              width: 10, height: 10,
+              background: '#fff',
+              border: '2px solid var(--accent)',
+              borderRadius: 2,
+              cursor: h.cursor,
+              zIndex: 20,
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              dragRef.current = {
+                type: 'resize',
+                blockId: block.id, parentId,
+                startMX: e.clientX, startMY: e.clientY,
+                startX: block.x, startY: block.y,
+                startW: block.width, startH: block.height,
+                handle: h.id,
+              }
+            }}
+          />
+        ))}
+      </div>
+    )
+  }
 
   return (
-    <div ref={ref} style={{ flex: 1, overflow: 'hidden', position: 'relative', background: 'var(--bg)', userSelect: editingId ? 'text' : 'none' }}
+    <div
+      ref={containerRef}
+      style={{ flex: 1, overflow: 'hidden', position: 'relative', background: 'var(--bg)' }}
       onMouseDown={(e) => {
-        if (e.button === 1 || (e.button === 0 && e.altKey)) {
-          pan.current = { sx: e.clientX, sy: e.clientY, spx: panX, spy: panY }
-          e.preventDefault()
-        } else {
-          if (editingId) commitEdit()
-          selectSection(null)
+        if (e.altKey || e.button === 1) {
+          panRef.current = { sx: e.clientX, sy: e.clientY, spx: panX, spy: panY }
+          e.preventDefault(); return
+        }
+        if (e.target === containerRef.current) {
+          clearSelection()
+          useStore.getState().setEditing(null)
+          const rect = containerRef.current!.getBoundingClientRect()
+          const sx = e.clientX - rect.left, sy = e.clientY - rect.top
+          selRectRef.current = { sx, sy, x: sx, y: sy, w: 0, h: 0 }
         }
       }}
+      onDragOver={e => e.preventDefault()}
+      onDrop={onDrop}
     >
-      {/* Grille */}
+      {/* Grille points */}
       <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
         <defs>
-          <pattern id="g" width={24*zoom} height={24*zoom} patternUnits="userSpaceOnUse" x={panX%(24*zoom)} y={panY%(24*zoom)}>
-            <circle cx={0} cy={0} r={0.6} fill="#252535" />
+          <pattern id="dots" width={24 * zoom} height={24 * zoom} patternUnits="userSpaceOnUse" x={panX % (24 * zoom)} y={panY % (24 * zoom)}>
+            <circle cx={0} cy={0} r={0.7} fill="var(--border)" />
           </pattern>
         </defs>
-        <rect width="100%" height="100%" fill="url(#g)" />
+        <rect width="100%" height="100%" fill="url(#dots)" />
       </svg>
 
-      {/* Empty / loading */}
-      {!inspection && <Hint>Entre une URL pour commencer</Hint>}
-      {inspection?.status === 'capturing' && <Spin label="Capture du screenshot…" />}
-      {inspection?.status === 'analyzing' && <Spin label="Claude analyse les éléments…" />}
+      {/* Empty state */}
+      {!blocks.length && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, pointerEvents: 'none' }}>
+          <div style={{ fontSize: 52, opacity: 0.06 }}>✦</div>
+          <div style={{ color: 'var(--muted)', fontSize: 14 }}>Glisse un composant depuis la bibliothèque</div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, opacity: 0.6 }}>ou importe une page via le menu</div>
+        </div>
+      )}
 
-      {/* Canvas world */}
-      <div style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${panX}px,${panY}px) scale(${zoom})` }}>
-        {sections.map(sec => {
-          const isSel = sec.id === selectedSectionId && !selectedBlockId
-          const color = sec.color
-
-          return (
-            <div key={sec.id} style={{ position: 'absolute', left: sec.x, top: sec.y, width: sec.width, height: sec.height }}>
-
-              {/* Screenshot clippé en fond */}
-              <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', borderRadius: 4 }}
-                onMouseDown={(e) => { e.stopPropagation(); selectSection(sec.id); startSectionDrag(e, sec) }}
-              >
-                <div
-                  onMouseDown={(e) => { e.stopPropagation(); selectSection(sec.id); startSectionDrag(e, sec) }}
-                  style={{ position: 'absolute', inset: 0, overflow: 'hidden', borderRadius: 4, cursor: sec.locked ? 'default' : 'move' }}
-                >
-                  <img src={inspection!.fullScreenshot} draggable={false}
-                    style={{
-                      position: 'absolute',
-                      top: -(sec.srcY * (sec.width / sec.srcWidth)),
-                      left: 0, width: sec.width, height: 'auto',
-                      display: 'block', pointerEvents: 'none',
-                      opacity: showBlocks ? 0.35 : 1,
-                    }}
-                  />
-                </div>
-
-                {/* Outline section */}
-                <div style={{
-                  position: 'absolute', inset: 0, borderRadius: 4,
-                  outline: isSel ? `2px solid ${color}` : `1px solid ${color}33`,
-                  outlineOffset: isSel ? 2 : 0,
-                  boxShadow: isSel ? `0 0 0 4px ${color}15` : undefined,
-                  pointerEvents: 'none',
-                }} />
-              </div>
-
-              {/* Label section */}
-              <div style={{
-                position: 'absolute', top: -22, left: 0,
-                background: color, color: '#000',
-                fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: '4px 4px 0 0',
-                letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap',
-                opacity: isSel || sec.id === selectedSectionId ? 1 : 0.6,
-                cursor: 'move',
-              }}
-                onMouseDown={(e) => { e.stopPropagation(); selectSection(sec.id); startSectionDrag(e, sec) }}
-              >
-                {sec.label}
-              </div>
-
-              {/* ── Blocs DOM ── */}
-              {showBlocks && sec.blocks?.map(blk => {
-                if (!blk.visible) return null
-                const isSelBlk = blk.id === selectedBlockId
-                const isHov = blk.id === hoveredBlockId
-                const isEditing = blk.id === editingId
-                const bColor = BLOCK_COLORS[blk.type] || BLOCK_COLORS.unknown
-                const displayText = blk.editedText ?? blk.text
-
-                return (
-                  <div key={blk.id}
-                    onMouseEnter={() => hoverBlock(blk.id)}
-                    onMouseLeave={() => hoverBlock(null)}
-                    onMouseDown={(e) => { e.stopPropagation(); selectBlock(sec.id, blk.id); startBlockDrag(e, sec, blk) }}
-                    onDoubleClick={(e) => startEdit(e, sec, blk)}
-                    style={{
-                      position: 'absolute',
-                      left: blk.x, top: blk.y,
-                      width: blk.width, height: blk.height,
-                      cursor: isEditing ? 'text' : 'move',
-                      outline: isSelBlk ? `2px solid ${bColor}` : isHov ? `1px solid ${bColor}88` : '1px solid transparent',
-                      outlineOffset: isSelBlk ? 1 : 0,
-                      borderRadius: 3,
-                      boxShadow: isSelBlk ? `0 0 0 3px ${bColor}20` : undefined,
-                      background: isSelBlk ? `${bColor}12` : isHov ? `${bColor}08` : 'transparent',
-                      zIndex: isSelBlk ? 10 : 1,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {/* Contenu du bloc */}
-                    {isEditing ? (
-                      <textarea
-                        autoFocus
-                        value={editText}
-                        onChange={e => setEditText(e.target.value)}
-                        onBlur={commitEdit}
-                        onKeyDown={e => { if (e.key === 'Escape') { setEditingId(null); editing.current = null } }}
-                        style={{
-                          position: 'absolute', inset: 0, width: '100%', height: '100%',
-                          background: 'rgba(12,12,24,0.9)', color: '#e2e2f0',
-                          border: 'none', outline: 'none', resize: 'none',
-                          fontFamily: 'inherit', padding: 4,
-                          fontSize: Math.min(blk.styles?.fontSize || 14, 24),
-                          fontWeight: blk.styles?.fontWeight || '400',
-                          lineHeight: 1.4, zIndex: 20,
-                        }}
-                      />
-                    ) : (
-                      displayText && (
-                        <div style={{
-                          position: 'absolute', inset: 0,
-                          display: 'flex', alignItems: 'center',
-                          padding: '2px 6px',
-                          fontSize: Math.min(blk.styles?.fontSize || 14, 20),
-                          fontWeight: blk.styles?.fontWeight || '400',
-                          color: isSelBlk || isHov ? '#e2e2f0' : 'transparent',
-                          overflow: 'hidden',
-                          whiteSpace: blk.type === 'heading' ? 'nowrap' : 'normal',
-                          transition: 'color 0.1s',
-                        }}>
-                          {displayText}
-                        </div>
-                      )
-                    )}
-
-                    {/* Badge type */}
-                    {(isSelBlk || isHov) && !isEditing && (
-                      <div style={{
-                        position: 'absolute', top: 2, left: 2,
-                        background: bColor, color: '#000',
-                        fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
-                        textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
-                        pointerEvents: 'none',
-                      }}>
-                        {blk.tag}{blk.editedText ? ' ✏' : ''}
-                      </div>
-                    )}
-
-                    {/* Handle resize bloc */}
-                    {isSelBlk && !isEditing && (
-                      <div onMouseDown={(e) => { e.stopPropagation(); startBlockResize(e, sec, blk) }}
-                        style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, background: bColor, cursor: 'nwse-resize', borderRadius: '2px 0 2px 0' }} />
-                    )}
-                  </div>
-                )
-              })}
-
-              {/* Handle resize section */}
-              {isSel && !sec.locked && (
-                <div onMouseDown={(e) => { e.stopPropagation(); startSectionResize(e, sec) }}
-                  style={{ position: 'absolute', bottom: -4, right: -4, width: 14, height: 14, background: color, cursor: 'nwse-resize', borderRadius: '0 0 4px 0', zIndex: 20 }} />
-              )}
-            </div>
-          )
-        })}
+      {/* Monde canvas */}
+      <div
+        id="canvas-world"
+        style={{ position: 'absolute', transformOrigin: '0 0', transform: `translate(${panX}px,${panY}px) scale(${zoom})` }}
+      >
+        {blocks.map(b => renderBlock(b))}
       </div>
 
-      {/* Zoom bar */}
-      <div style={{ position: 'absolute', bottom: 16, right: 16, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 12px', display: 'flex', gap: 10, alignItems: 'center', fontSize: 11, color: 'var(--muted)' }}>
+      {/* Rectangle de sélection */}
+      {selRect && (
+        <div style={{ position: 'absolute', left: selRect.x, top: selRect.y, width: selRect.w, height: selRect.h, background: 'rgba(124,106,247,0.08)', border: '1px solid rgba(124,106,247,0.5)', pointerEvents: 'none', zIndex: 50 }} />
+      )}
+
+      {/* Zoom + raccourcis */}
+      <div style={{ position: 'absolute', bottom: 14, right: 14, display: 'flex', gap: 6, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 10px', fontSize: 11, color: 'var(--muted)' }}>
         <span>{Math.round(zoom * 100)}%</span>
-        <button style={btnStyle} onClick={() => setZoom(Math.max(0.1, zoom * 0.85))}>−</button>
-        <button style={btnStyle} onClick={() => setZoom(Math.min(2, zoom * 1.18))}>+</button>
-        <button style={{ ...btnStyle, fontSize: 10 }} onClick={() => { setZoom(0.55); setPan(60, 40) }}>Reset</button>
       </div>
-
-      <div style={{ position: 'absolute', bottom: 16, left: 16, color: 'var(--muted)', fontSize: 10, opacity: 0.45 }}>
-        Scroll = zoom · Alt+drag = pan · Double-clic = éditer texte
+      <div style={{ position: 'absolute', bottom: 14, left: 14, color: 'var(--muted)', fontSize: 10, opacity: 0.4 }}>
+        Alt+glisser = pan · Scroll = zoom · Del = supprimer · Ctrl+D = dupliquer
       </div>
-    </div>
-  )
-}
-
-const btnStyle: React.CSSProperties = { background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 15, padding: '0 2px', lineHeight: 1 }
-
-function Hint({ children }: { children: string }) {
-  return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, pointerEvents: 'none' }}>
-      <div style={{ fontSize: 44, opacity: 0.07 }}>⊞</div>
-      <div style={{ color: 'var(--muted)', fontSize: 13 }}>{children}</div>
-    </div>
-  )
-}
-function Spin({ label }: { label: string }) {
-  return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-      <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} className="spin" />
-      <div style={{ color: 'var(--dim)', fontSize: 12 }}>{label}</div>
     </div>
   )
 }
