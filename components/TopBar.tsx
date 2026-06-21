@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { Sparkles, ChevronDown, Download, Loader, FileText, Globe, Code, ImageIcon, Terminal, Plus, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Copy, Trash2, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, LayoutGrid, Play, Share2, Check, Group, Ungroup } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import { parseHTMLToBlocks, makeFullPageDemo, importedToScreen } from '@/lib/blocks-library'
+import { SCAN_SNIPPET } from '@/lib/scanSnippet'
 
 export default function TopBar() {
   const { projectName, setProjectName, screens, currentScreenId, tokens, components, selectedIds, zoom, setZoom, setPan,
@@ -188,7 +189,7 @@ export default function TopBar() {
               { icon: <FileText size={12}/>, label: 'Session JSON', action: () => { const i = document.createElement('input'); i.type='file'; i.accept='.json'; i.onchange=(e)=>importJSON(e as unknown as React.ChangeEvent<HTMLInputElement>); i.click(); setImportOpen(false) } },
               { icon: <ImageIcon size={12}/>, label: 'Image', action: () => { imgRef.current?.click(); setImportOpen(false) } },
               null,
-              { icon: <Terminal size={12}/>, label: 'Via CLI', action: () => { setImportMode('cli'); setImportOpen(false) } },
+              { icon: <Terminal size={12}/>, label: 'Depuis ton app (scan)', action: () => { setImportMode('cli'); setImportOpen(false) } },
             ].map((item, i) =>
               item === null ? <div key={i} style={{ height: 1, background: 'var(--border)', margin: '3px 0' }} /> : (
                 <button key={item.label} onClick={item.action}
@@ -226,10 +227,28 @@ export default function TopBar() {
       )}
 
       {importMode === 'cli' && (
-        <div className="fadein" style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 12px' }}>
-          <Terminal size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          <code style={{ fontSize: 11, color: 'var(--dim)' }}>hub-inspector scan --url http://localhost:3000 --app-dir ./app</code>
-          <button className="btn-icon" onClick={() => setImportMode(null)}>✕</button>
+        <div className="fadein" style={{ position: 'absolute', top: 52, left: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, zIndex: 200, width: 460, boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+            <Terminal size={13} style={{ color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Importer ton app locale</span>
+            <div style={{ flex: 1 }} />
+            <button className="btn-icon" onClick={() => setImportMode(null)}>✕</button>
+          </div>
+          <ol style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.7, paddingLeft: 18, margin: '0 0 10px' }}>
+            <li>Lance ton app (ex&nbsp;: <code style={{ color: 'var(--text)' }}>npm run dev</code>) et ouvre-la dans ton navigateur.</li>
+            <li>Ouvre la console (<b>F12</b> → onglet Console).</li>
+            <li><b>Copie</b> le script ci-dessous, colle-le dans la console, Entrée.</li>
+            <li>Un fichier <code style={{ color: 'var(--text)' }}>hub-scan.json</code> se télécharge.</li>
+            <li>Réimporte-le ici via <b>Importer → Session JSON</b>.</li>
+          </ol>
+          <textarea className="input" readOnly rows={4} value={SCAN_SNIPPET} onFocus={e => (e.target as HTMLTextAreaElement).select()} style={{ fontFamily: 'monospace', fontSize: 9, lineHeight: 1.4 }} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button className="btn btn-primary" onClick={() => { navigator.clipboard.writeText(SCAN_SNIPPET); setStatus('idle') }}><Copy size={12} /> Copier le script</button>
+            <button className="btn btn-ghost" onClick={() => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([SCAN_SNIPPET], { type: 'text/javascript' })); a.download = 'hub-scan.js'; a.click() }}><Download size={12} /> Télécharger .js</button>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.75 }}>
+            100% local : aucune donnée n'est envoyée, le script lit le rendu de ta page (positions, styles, textes, images).
+          </div>
         </div>
       )}
 
