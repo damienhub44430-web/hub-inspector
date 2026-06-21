@@ -1,4 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Éditeur UX visuel (façon Figma) pour importer des UI existantes et retravailler design & UX.
+
+## Configuration des imports (clés API)
+
+Les imports avancés et l'assistant Claude utilisent des variables d'environnement.
+Copie `.env.example` en `.env.local` et renseigne :
+
+| Variable | Débloque | Requis |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Import « Depuis une URL » (analyse Vision) + assistant Claude par bloc | recommandé |
+| `BROWSERLESS_TOKEN` | Extraction DOM haute fidélité de l'import URL (sinon Microlink + Vision) | optionnel |
+
+```bash
+cp .env.example .env.local   # puis édite .env.local, puis: npm run dev
+```
+
+Où mettre la clé selon le contexte :
+- **Local** : `.env.local` (ignoré par git).
+- **Claude Code (web)** : variables d'environnement de l'environnement — voir https://code.claude.com/docs/en/claude-code-on-the-web
+- **Déploiement** (Vercel/Netlify) : variables d'environnement du projet dans le dashboard.
+
+Notes :
+- **Sans clé**, l'import URL fonctionne quand même en **mode capture** (le screenshot devient une image éditable).
+- L'import URL ne marche que sur des **URL publiques** (jamais `localhost`).
+- Pour une app **locale / un projet git non déployé** : `Importer → Depuis ton app (scan)` (aucune clé, 100% local).
 
 ## Getting Started
 

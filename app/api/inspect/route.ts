@@ -184,6 +184,11 @@ async function extractViaFallback(url: string): Promise<{
   const mediaType = imgRes.headers.get('content-type') || 'image/jpeg'
   const screenshotDataUrl = `data:${mediaType};base64,${imgB64}`
 
+  // Sans clé Anthropic : mode capture seule (le screenshot devient une image éditable)
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return { elements: [], pageWidth, pageHeight, screenshot: screenshotDataUrl }
+  }
+
   // Claude Vision pour détecter les blocs
   const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -325,6 +330,19 @@ export async function POST(req: NextRequest) {
     }
 
     const { elements, pageWidth, pageHeight, screenshot } = extracted
+
+    // Mode capture seule (pas de clé/Vision, ou aucun élément détecté) :
+    // on renvoie le screenshot, le client l'importe comme image éditable.
+    if (!elements.length) {
+      return NextResponse.json({
+        url: cleanUrl,
+        fullScreenshot: screenshot,
+        pageWidth, pageHeight,
+        sections: [],
+        extractionSource: extractionSource === 'browserless' ? 'browserless-empty' : 'screenshot-only',
+        analyzedAt: new Date().toISOString(),
+      })
+    }
 
     // Regrouper en sections
     const sections = groupIntoSections(elements, pageHeight)
