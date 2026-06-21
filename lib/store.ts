@@ -159,6 +159,9 @@ interface AppState {
   insertComponent: (id: string) => void
   deleteComponent: (id: string) => void
   renameComponent: (id: string, name: string) => void
+  updateComponentFromInstance: (blockId: string) => void
+  resetInstance: (blockId: string) => void
+  detachInstance: (blockId: string) => void
 
   // ── Vue ──
   setZoom: (z: number) => void
@@ -599,12 +602,51 @@ export const useStore = create<AppState>()((set, get) => ({
     const s = get()
     const comp = s.components.find(c => c.id === id)
     if (!comp) return
-    const root = cloneBlock(comp.root); root.x = 80; root.y = 80
+    // Instance liée : taggée avec componentId pour la synchronisation
+    const root = cloneBlock(comp.root); root.x = 80; root.y = 80; root.componentId = comp.id
     set(st => ({ ...patchScreens(st, bs => [...bs, root]), selectedIds: [root.id], leftTab: 'layers' }))
   },
 
   deleteComponent: (id) => set(s => ({ components: s.components.filter(c => c.id !== id) })),
   renameComponent: (id, name) => set(s => ({ components: s.components.map(c => c.id === id ? { ...c, name } : c) })),
+
+  // Met à jour le composant maître depuis une instance, puis propage à toutes les autres instances (tous écrans)
+  updateComponentFromInstance: (blockId) => {
+    const s = get()
+    const inst = currentBlocks(s).find(b => b.id === blockId)
+    if (!inst?.componentId) return
+    const comp = s.components.find(c => c.id === inst.componentId)
+    if (!comp) return
+    get().pushHistory()
+    const newRoot = cloneBlock(inst); newRoot.x = 0; newRoot.y = 0; delete newRoot.componentId
+    const components = s.components.map(c => c.id === comp.id ? { ...c, root: newRoot } : c)
+    const screens = s.screens.map(scr => ({
+      ...scr,
+      blocks: scr.blocks.map(b =>
+        b.componentId === comp.id && b.id !== blockId
+          ? { ...cloneBlock(newRoot), id: b.id, x: b.x, y: b.y, componentId: comp.id }
+          : b),
+    }))
+    set({ components, screens })
+  },
+
+  // Réinitialise une instance depuis le composant maître (annule les modifs locales)
+  resetInstance: (blockId) => {
+    const s = get()
+    const inst = currentBlocks(s).find(b => b.id === blockId)
+    if (!inst?.componentId) return
+    const comp = s.components.find(c => c.id === inst.componentId)
+    if (!comp) return
+    get().pushHistory()
+    set(st => patchScreens(st, bs => bs.map(b =>
+      b.id === blockId ? { ...cloneBlock(comp.root), id: b.id, x: b.x, y: b.y, componentId: comp.id } : b)))
+  },
+
+  // Détache une instance (devient un bloc indépendant)
+  detachInstance: (blockId) => {
+    get().pushHistory()
+    set(st => patchScreens(st, bs => bs.map(b => b.id === blockId ? { ...b, componentId: undefined } : b)))
+  },
 
   // ── Vue ──
   setZoom: (zoom) => set({ zoom }),

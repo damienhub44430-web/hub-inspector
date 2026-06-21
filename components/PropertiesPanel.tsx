@@ -1,6 +1,6 @@
 'use client'
 import { useState, useRef } from 'react'
-import { Sparkles, Loader, Send, Copy, RotateCcw, Wand2, Type, Layout, Zap, Link, AlignLeft, AlignCenter, AlignRight } from 'lucide-react'
+import { Sparkles, Loader, Send, Copy, RotateCcw, Wand2, Type, Layout, Zap, Link, AlignLeft, AlignCenter, AlignRight, Component, UploadCloud, RefreshCw, Unlink } from 'lucide-react'
 import { useStore } from '@/lib/store'
 import type { Block, BlockStyle, ColorToken } from '@/lib/types'
 
@@ -62,7 +62,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ─── Panel propriétés ─────────────────────────────────────────────────────
 
 export default function PropertiesPanel() {
-  const { screens, currentScreenId, tokens, selectedIds, messages, addMessage, clearMessages, claudeLoading, setClaudeLoading, updateBlock, updateBlockStyle, updateScreen, pushHistory } = useStore()
+  const { screens, currentScreenId, tokens, components, selectedIds, messages, addMessage, clearMessages, claudeLoading, setClaudeLoading, updateBlock, updateBlockStyle, updateScreen, pushHistory, updateComponentFromInstance, resetInstance, detachInstance } = useStore()
   const blocks = screens.find(s => s.id === currentScreenId)?.blocks ?? []
   const currentScreen = screens.find(s => s.id === currentScreenId)
   const [input, setInput] = useState('')
@@ -165,6 +165,25 @@ export default function PropertiesPanel() {
           )
         ) : (
           <>
+            {/* Instance de composant */}
+            {block.componentId && (
+              <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 14px', background: 'rgba(124,106,247,0.06)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+                  <Component size={13} style={{ color: 'var(--accent)' }} />
+                  <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{components.find(c => c.id === block!.componentId)?.name || 'Composant'}</span>
+                  <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: 'auto' }}>Instance</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <button className="btn btn-ghost" style={{ fontSize: 11, justifyContent: 'flex-start' }} onClick={() => updateComponentFromInstance(block!.id)}><UploadCloud size={12} /> Mettre à jour le composant</button>
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    <button className="btn btn-ghost" style={{ fontSize: 11, flex: 1, justifyContent: 'center' }} onClick={() => resetInstance(block!.id)}><RefreshCw size={11} /> Réinit.</button>
+                    <button className="btn btn-ghost" style={{ fontSize: 11, flex: 1, justifyContent: 'center' }} onClick={() => detachInstance(block!.id)}><Unlink size={11} /> Détacher</button>
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', opacity: 0.75, marginTop: 6 }}>« Mettre à jour » applique cette instance à toutes les autres.</div>
+              </div>
+            )}
+
             {/* Position & taille */}
             <Section title="Disposition">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

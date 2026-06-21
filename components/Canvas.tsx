@@ -99,7 +99,7 @@ const HANDLES = [
 // ─── Canvas principal ─────────────────────────────────────────────────────
 export default function Canvas() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { screens, currentScreenId, tokens, selectedIds, editingId, zoom, panX, panY,
+  const { screens, currentScreenId, tokens, components, selectedIds, editingId, zoom, panX, panY,
     select, clearSelection, setEditing, setZoom, setPan,
     updateBlock } = useStore()
   const screen = screens.find(s => s.id === currentScreenId)
@@ -313,7 +313,7 @@ export default function Canvas() {
         {/* Label discret */}
         {isSel && !isEdit && (
           <div style={{ position: 'absolute', top: -20, left: 0, background: 'var(--accent)', color: '#fff', fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: '4px 4px 0 0', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
-            {block.kind}{block.locked ? ' 🔒' : ''}
+            {block.componentId ? `◇ ${components.find(c => c.id === block.componentId)?.name || 'instance'}` : block.kind}{block.locked ? ' 🔒' : ''}
           </div>
         )}
 

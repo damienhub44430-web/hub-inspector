@@ -51,6 +51,8 @@ export interface Block {
   locked: boolean
   // Enfants (sections/groupes)
   children?: Block[]
+  // Instance d'un composant : lie ce bloc à un ComponentDef (synchronisation)
+  componentId?: string
   // Prototypage : navigue vers un autre écran au clic (mode présentation)
   linkTo?: string
   // Infos source (import)

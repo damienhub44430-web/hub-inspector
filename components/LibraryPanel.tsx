@@ -13,6 +13,7 @@ function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
   const [open, setOpen] = useState(true)
   const isSel = selectedIds.includes(block.id)
   const hasChildren = (block.children?.length || 0) > 0
+  const isInstance = !!block.componentId
 
   const kindColors: Record<string, string> = {
     heading: '#7c6af7', text: '#60a5fa', button: '#f59e0b', image: '#f472b6',
@@ -49,8 +50,8 @@ function LayerRow({ block, depth = 0 }: { block: Block; depth?: number }) {
           </button>
         ) : <span style={{ width: 14 }} />}
 
-        <div style={{ width: 18, height: 18, borderRadius: 4, background: `${color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color, flexShrink: 0, fontWeight: 700 }}>
-          {kindIcons[block.kind] || '·'}
+        <div title={isInstance ? 'Instance de composant' : block.kind} style={{ width: 18, height: 18, borderRadius: 4, background: isInstance ? 'rgba(124,106,247,0.18)' : `${color}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: isInstance ? 'var(--accent)' : color, flexShrink: 0, fontWeight: 700 }}>
+          {isInstance ? '◇' : (kindIcons[block.kind] || '·')}
         </div>
 
         <span style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: block.visible !== false ? 'var(--text)' : 'var(--muted)', opacity: block.locked ? 0.5 : 1 }}>
