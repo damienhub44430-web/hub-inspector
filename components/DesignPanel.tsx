@@ -1,6 +1,6 @@
 'use client'
 import { useRef } from 'react'
-import { Plus, Trash2, Type, Component, Download } from 'lucide-react'
+import { Plus, Trash2, Type, Component, Download, Ruler, Square } from 'lucide-react'
 import { useStore } from '@/lib/store'
 
 function ColorTokenRow({ id, name, value }: { id: string; name: string; value: string }) {
@@ -19,6 +19,8 @@ function ColorTokenRow({ id, name, value }: { id: string; name: string; value: s
 export default function DesignPanel() {
   const { tokens, addColorToken, selectedIds, getBlocks,
     addTextStyle, applyTextStyle, deleteTextStyle,
+    addSpacingToken, updateSpacingToken, deleteSpacingToken,
+    addShadowToken, updateShadowToken, deleteShadowToken,
     components, saveSelectionAsComponent, insertComponent, deleteComponent, renameComponent } = useStore()
 
   const hasSel = selectedIds.length > 0
@@ -72,6 +74,52 @@ export default function DesignPanel() {
               <button className="btn-icon" style={{ color: 'var(--error)', padding: 3 }} onClick={() => deleteTextStyle(t.id)}><Trash2 size={10} /></button>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Espacements */}
+      <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+          <span className="panel-label"><Ruler size={10} style={{ verticalAlign: '-1px', marginRight: 4 }} />Espacements</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-icon" title="Ajouter un espacement" onClick={() => addSpacingToken('Espace', 16)}><Plus size={13} /></button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {tokens.spacing.map(sp => (
+            <div key={sp.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input className="input input-sm" style={{ flex: 1 }} value={sp.name} onChange={e => updateSpacingToken(sp.id, { name: e.target.value })} />
+              <input className="input input-sm" type="number" style={{ width: 58 }} value={sp.value} onChange={e => updateSpacingToken(sp.id, { value: Number(e.target.value) })} />
+              <span style={{ fontSize: 10, color: 'var(--muted)' }}>px</span>
+              <button className="btn-icon" style={{ color: 'var(--error)' }} onClick={() => deleteSpacingToken(sp.id)}><Trash2 size={11} /></button>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.7 }}>
+          Applique une valeur d'un clic dans la section « Espacement » du panneau de droite.
+        </div>
+      </div>
+
+      {/* Ombres */}
+      <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+          <span className="panel-label"><Square size={10} style={{ verticalAlign: '-1px', marginRight: 4 }} />Ombres</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-icon" title="Ajouter une ombre" onClick={() => addShadowToken('Ombre', '0 4px 12px rgba(0,0,0,0.3)')}><Plus size={13} /></button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {tokens.shadows.map(sh => (
+            <div key={sh.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 26, height: 26, borderRadius: 5, background: 'var(--card2)', boxShadow: sh.value, flexShrink: 0 }} />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <input className="input input-sm" value={sh.name} onChange={e => updateShadowToken(sh.id, { name: e.target.value })} />
+                <input className="input input-sm" style={{ fontSize: 10, fontFamily: 'monospace' }} value={sh.value} onChange={e => updateShadowToken(sh.id, { value: e.target.value })} />
+              </div>
+              <button className="btn-icon" style={{ color: 'var(--error)' }} onClick={() => deleteShadowToken(sh.id)}><Trash2 size={11} /></button>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8, opacity: 0.7 }}>
+          Applique une ombre depuis la section « Ombre » du panneau de droite ; la modifier met à jour tous les blocs liés.
         </div>
       </div>
 

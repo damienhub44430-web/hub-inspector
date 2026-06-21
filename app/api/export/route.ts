@@ -47,7 +47,10 @@ export async function POST(req: NextRequest) {
 
   if (!blocks?.length) return NextResponse.json({ html: '<html><body></body></html>' })
 
-  const tokenVars = (tokens?.colors || []).map(c => `    --tok-${c.id}: ${c.value};`).join('\n')
+  const tokenVars = [
+    ...(tokens?.colors || []).map(c => `    --tok-${c.id}: ${c.value};`),
+    ...(tokens?.shadows || []).map(sh => `    --shadow-${sh.id}: ${sh.value};`),
+  ].join('\n')
 
   // Calculer les bounds
   const allX = blocks.map((b: Block) => b.x)

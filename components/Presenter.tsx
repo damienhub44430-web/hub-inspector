@@ -30,7 +30,10 @@ export default function Presenter() {
 
   if (!screen) return null
 
-  const tokenVars = Object.fromEntries(tokens.colors.map(c => [`--tok-${c.id}`, c.value])) as React.CSSProperties
+  const tokenVars = Object.fromEntries([
+    ...tokens.colors.map(c => [`--tok-${c.id}`, c.value]),
+    ...tokens.shadows.map(sh => [`--shadow-${sh.id}`, sh.value]),
+  ]) as React.CSSProperties
   const scale = Math.min((window.innerWidth - 80) / screen.width, (window.innerHeight - 80) / screen.height, 1)
 
   const renderBlock = (b: Block): React.ReactNode => {

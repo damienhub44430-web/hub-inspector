@@ -1,5 +1,4 @@
 import type { ProjectMeta, ProjectDoc, DesignTokens, Screen } from './types'
-
 const INDEX_KEY = 'hub:index'
 const ACTIVE_KEY = 'hub:active'
 const docKey = (id: string) => `hub:proj:${id}`
@@ -50,6 +49,31 @@ export function defaultTokens(): DesignTokens {
       { id: 'h2', name: 'Titre 2', fontSize: 32, fontWeight: '700', lineHeight: 1.2, color: '#e2e2f0' },
       { id: 'body', name: 'Corps', fontSize: 16, fontWeight: '400', lineHeight: 1.6, color: '#9494b0' },
     ],
+    spacing: [
+      { id: 'xs', name: 'XS', value: 4 },
+      { id: 'sm', name: 'S', value: 8 },
+      { id: 'md', name: 'M', value: 16 },
+      { id: 'lg', name: 'L', value: 24 },
+      { id: 'xl', name: 'XL', value: 40 },
+      { id: '2xl', name: '2XL', value: 64 },
+    ],
+    shadows: [
+      { id: 'sm', name: 'Petite', value: '0 1px 2px rgba(0,0,0,0.25)' },
+      { id: 'md', name: 'Moyenne', value: '0 4px 12px rgba(0,0,0,0.3)' },
+      { id: 'lg', name: 'Grande', value: '0 12px 32px rgba(0,0,0,0.35)' },
+      { id: 'glow', name: 'Glow', value: '0 0 24px rgba(124,106,247,0.45)' },
+    ],
+  }
+}
+
+// Backfill des tokens (rétro-compat projets sauvegardés avant l'ajout spacing/shadows)
+export function normalizeTokens(t?: Partial<DesignTokens>): DesignTokens {
+  const d = defaultTokens()
+  return {
+    colors: Array.isArray(t?.colors) ? t!.colors : d.colors,
+    textStyles: Array.isArray(t?.textStyles) ? t!.textStyles : d.textStyles,
+    spacing: Array.isArray(t?.spacing) ? t!.spacing : d.spacing,
+    shadows: Array.isArray(t?.shadows) ? t!.shadows : d.shadows,
   }
 }
 
@@ -70,7 +94,7 @@ export function normalizeDoc(doc: Partial<ProjectDoc> | null): ProjectDoc {
     projectName: doc?.projectName || 'Projet',
     screens,
     currentScreenId: cur && screens.some(s => s.id === cur) ? cur : screens[0].id,
-    tokens: doc?.tokens && Array.isArray(doc.tokens.colors) ? doc.tokens : defaultTokens(),
+    tokens: normalizeTokens(doc?.tokens),
     components: Array.isArray(doc?.components) ? doc!.components : [],
   }
 }

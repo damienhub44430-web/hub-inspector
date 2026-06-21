@@ -273,6 +273,42 @@ export default function PropertiesPanel() {
                   </div>
                 ))}
               </div>
+              {tokens.spacing.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tokens (4 côtés)</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {tokens.spacing.map(sp => (
+                      <button key={sp.id} title={`${sp.name} = ${sp.value}px`} onClick={() => upStyle({ paddingTop: sp.value, paddingRight: sp.value, paddingBottom: sp.value, paddingLeft: sp.value })}
+                        style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: 'pointer', background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--dim)', fontFamily: 'inherit' }}>
+                        {sp.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Section>
+
+            {/* Ombre */}
+            <Section title="Ombre">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                <button onClick={() => upStyle({ boxShadow: undefined })}
+                  style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    background: !block.style.boxShadow ? 'var(--accent)' : 'var(--card)', color: !block.style.boxShadow ? '#fff' : 'var(--dim)', border: '1px solid var(--border)' }}>
+                  Aucune
+                </button>
+                {tokens.shadows.map(sh => {
+                  const active = block!.style.boxShadow === `var(--shadow-${sh.id})`
+                  return (
+                    <button key={sh.id} title={sh.value} onClick={() => upStyle({ boxShadow: `var(--shadow-${sh.id})` })}
+                      style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                        background: active ? 'var(--accent)' : 'var(--card)', color: active ? '#fff' : 'var(--dim)', border: '1px solid var(--border)' }}>
+                      {sh.name}
+                    </button>
+                  )
+                })}
+              </div>
+              <input className="input input-sm" style={{ fontFamily: 'monospace', fontSize: 10 }} placeholder="ex: 0 4px 12px rgba(0,0,0,.3)"
+                value={block.style.boxShadow || ''} onChange={e => upStyle({ boxShadow: e.target.value || undefined })} />
             </Section>
 
             {/* Lien (pour boutons) */}

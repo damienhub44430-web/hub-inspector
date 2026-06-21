@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type {
   Block, ImportMode, LeftTab, Message, BlockStyle, Screen,
-  ProjectMeta, ProjectDoc, DesignTokens, ColorToken, TextStyleToken, ComponentDef, AppView,
+  ProjectMeta, ProjectDoc, DesignTokens, ColorToken, TextStyleToken, SpacingToken, ShadowToken, ComponentDef, AppView,
 } from './types'
 import {
   loadIndex, saveIndex, loadActiveId, saveActiveId, loadDoc, saveDoc, removeDoc,
@@ -153,6 +153,12 @@ interface AppState {
   updateTextStyle: (id: string, changes: Partial<TextStyleToken>) => void
   deleteTextStyle: (id: string) => void
   applyTextStyle: (blockId: string, styleId: string, parentId?: string) => void
+  addSpacingToken: (name: string, value: number) => void
+  updateSpacingToken: (id: string, changes: Partial<SpacingToken>) => void
+  deleteSpacingToken: (id: string) => void
+  addShadowToken: (name: string, value: string) => void
+  updateShadowToken: (id: string, changes: Partial<ShadowToken>) => void
+  deleteShadowToken: (id: string) => void
 
   // ── Composants réutilisables ──
   saveSelectionAsComponent: (name: string) => void
@@ -567,6 +573,15 @@ export const useStore = create<AppState>()((set, get) => ({
   addTextStyle: (style) => set(s => ({ tokens: { ...s.tokens, textStyles: [...s.tokens.textStyles, { id: rid('txt'), ...style }] } })),
   updateTextStyle: (id, changes) => set(s => ({ tokens: { ...s.tokens, textStyles: s.tokens.textStyles.map(t => t.id === id ? { ...t, ...changes } : t) } })),
   deleteTextStyle: (id) => set(s => ({ tokens: { ...s.tokens, textStyles: s.tokens.textStyles.filter(t => t.id !== id) } })),
+
+  addSpacingToken: (name, value) => set(s => ({ tokens: { ...s.tokens, spacing: [...s.tokens.spacing, { id: rid('sp'), name: name || 'Espace', value }] } })),
+  updateSpacingToken: (id, changes) => set(s => ({ tokens: { ...s.tokens, spacing: s.tokens.spacing.map(t => t.id === id ? { ...t, ...changes } : t) } })),
+  deleteSpacingToken: (id) => set(s => ({ tokens: { ...s.tokens, spacing: s.tokens.spacing.filter(t => t.id !== id) } })),
+
+  addShadowToken: (name, value) => set(s => ({ tokens: { ...s.tokens, shadows: [...s.tokens.shadows, { id: rid('sh'), name: name || 'Ombre', value }] } })),
+  updateShadowToken: (id, changes) => set(s => ({ tokens: { ...s.tokens, shadows: s.tokens.shadows.map(t => t.id === id ? { ...t, ...changes } : t) } })),
+  deleteShadowToken: (id) => set(s => ({ tokens: { ...s.tokens, shadows: s.tokens.shadows.filter(t => t.id !== id) } })),
+
   applyTextStyle: (blockId, styleId, parentId) => {
     const s = get()
     const ts = s.tokens.textStyles.find(t => t.id === styleId)

@@ -76,7 +76,14 @@ export interface TextStyleToken {
   id: string; name: string
   fontSize: number; fontWeight: string; lineHeight?: number; color?: string; fontFamily?: string
 }
-export interface DesignTokens { colors: ColorToken[]; textStyles: TextStyleToken[] }
+export interface SpacingToken { id: string; name: string; value: number }
+export interface ShadowToken { id: string; name: string; value: string }
+export interface DesignTokens {
+  colors: ColorToken[]
+  textStyles: TextStyleToken[]
+  spacing: SpacingToken[]
+  shadows: ShadowToken[]
+}
 
 // ── Composant réutilisable (arbre de blocs sauvegardé) ──
 export interface ComponentDef { id: string; name: string; root: Block }

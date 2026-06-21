@@ -104,7 +104,10 @@ export default function Canvas() {
     updateBlock } = useStore()
   const screen = screens.find(s => s.id === currentScreenId)
   const blocks = screen?.blocks ?? []
-  const tokenVars = Object.fromEntries(tokens.colors.map(c => [`--tok-${c.id}`, c.value])) as React.CSSProperties
+  const tokenVars = Object.fromEntries([
+    ...tokens.colors.map(c => [`--tok-${c.id}`, c.value]),
+    ...tokens.shadows.map(sh => [`--shadow-${sh.id}`, sh.value]),
+  ]) as React.CSSProperties
 
   const dragRef = useRef<{
     type: 'move' | 'resize'
@@ -261,7 +264,7 @@ export default function Canvas() {
       height: block.height,
       outline: isSel ? '2px solid var(--accent)' : 'none',
       outlineOffset: isSel ? 1 : 0,
-      boxShadow: isSel ? '0 0 0 4px rgba(124,106,247,0.15)' : undefined,
+      boxShadow: isSel ? '0 0 0 4px rgba(124,106,247,0.15)' : baseStyle.boxShadow,
       overflow: isContainer ? 'visible' : 'hidden',
       cursor: block.locked ? 'default' : isEdit ? 'text' : 'move',
       userSelect: isEdit ? 'text' : 'none',
