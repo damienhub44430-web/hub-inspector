@@ -19,6 +19,14 @@ export default function TopBar() {
 
   const loading = status === 'loading'
 
+  // Ouvre un sélecteur de fichier caché. Appelé uniquement au clic : le menu
+  // d'import référence ces sélecteurs par identifiant, pas par fermeture sur le
+  // ref (sinon react-hooks/refs y voit un accès au ref pendant le rendu).
+  const ouvrirSelecteur = (cible: 'html' | 'image') => {
+    ;(cible === 'html' ? fileRef : imgRef).current?.click()
+    setImportOpen(false)
+  }
+
   // ─── Import URL ──────────────────────────────────────────────────────────
   const importURL = async () => {
     if (!urlVal) return
@@ -164,14 +172,14 @@ export default function TopBar() {
               null,
               { icon: <Globe size={12}/>, label: 'Depuis une URL', action: () => { setImportMode('url'); setImportOpen(false) } },
               { icon: <Code size={12}/>, label: 'Coller du HTML', action: () => { setImportMode('html'); setImportOpen(false) } },
-              { icon: <FileText size={12}/>, label: 'Fichier .html', action: () => { fileRef.current?.click(); setImportOpen(false) } },
+              { icon: <FileText size={12}/>, label: 'Fichier .html', selecteur: 'html' as const },
               { icon: <FileText size={12}/>, label: 'Session JSON', action: () => { const i = document.createElement('input'); i.type='file'; i.accept='.json'; i.onchange=(e)=>importJSON(e as unknown as React.ChangeEvent<HTMLInputElement>); i.click(); setImportOpen(false) } },
-              { icon: <ImageIcon size={12}/>, label: 'Image', action: () => { imgRef.current?.click(); setImportOpen(false) } },
+              { icon: <ImageIcon size={12}/>, label: 'Image', selecteur: 'image' as const },
               null,
               { icon: <Terminal size={12}/>, label: 'Via CLI', action: () => { setImportMode('cli'); setImportOpen(false) } },
             ].map((item, i) =>
               item === null ? <div key={i} style={{ height: 1, background: 'var(--border)', margin: '3px 0' }} /> : (
-                <button key={item.label} onClick={item.action}
+                <button key={item.label} onClick={() => (item.selecteur ? ouvrirSelecteur(item.selecteur) : item.action?.())}
                   style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 14px', background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', textAlign: 'left' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--card2)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -233,15 +241,15 @@ export default function TopBar() {
       )}
       {hasMulti && (
         <>
-          {[
-            ['left', <AlignLeft size={13}/>,'Aligner à gauche'],
-            ['center', <AlignCenter size={13}/>,'Centrer horizontalement'],
-            ['right', <AlignRight size={13}/>,'Aligner à droite'],
-            ['top', <AlignStartVertical size={13}/>,'Aligner en haut'],
-            ['middle', <AlignCenterVertical size={13}/>,'Centrer verticalement'],
-            ['bottom', <AlignEndVertical size={13}/>,'Aligner en bas'],
-          ].map(([axis, icon, title]) => (
-            <button key={axis as string} className="btn-icon" title={title as string} onClick={() => alignBlocks(axis as 'left'|'center'|'right'|'top'|'middle'|'bottom')}>{icon}</button>
+          {([
+            ['left', AlignLeft, 'Aligner à gauche'],
+            ['center', AlignCenter, 'Centrer horizontalement'],
+            ['right', AlignRight, 'Aligner à droite'],
+            ['top', AlignStartVertical, 'Aligner en haut'],
+            ['middle', AlignCenterVertical, 'Centrer verticalement'],
+            ['bottom', AlignEndVertical, 'Aligner en bas'],
+          ] as const).map(([axis, Icone, title]) => (
+            <button key={axis} className="btn-icon" title={title} onClick={() => alignBlocks(axis)}><Icone size={13}/></button>
           ))}
           <div className="divider" />
         </>

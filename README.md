@@ -34,3 +34,10 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## CI
+
+Depuis le 02/10/2026 (session sécu), `.github/workflows/ci.yml` bloque chaque PR et chaque push
+sur la branche principale : `npm ci` (scripts d'installation désactivés),
+`npm audit --omit=dev --audit-level=high`, `npm run lint`, `npm run typecheck`, `npm run build`.
+La CI n'a aucun secret : le build doit passer sans variable d'environnement.

@@ -1,0 +1,50 @@
+# CI minimale bloquante (session sécu du 02/10/2026) : install, audit npm de
+# production, lint zéro warning, typecheck, build — sur chaque push main et
+# chaque pull request.
+#
+# La CI n'a AUCUN secret : le build doit passer sans variables d'env (les env
+# ne sont lues qu'à l'exécution, jamais exigées au build).
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+
+# Un push chasse le run précédent de la même branche.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Chaîne d'approvisionnement npm (ChainDrop / Shai-Hulud, août 2026) : aucun
+# script preinstall/postinstall ne s'exécute à l'installation. Un paquet qui
+# aurait vraiment besoin du sien se reconstruit avec `npm rebuild <paquet>`.
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Bloquant sur high/critical, dépendances de production uniquement
+      # (les avis dev-only de la toolchain sont suivis à part).
+      - name: Audit npm (prod)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build

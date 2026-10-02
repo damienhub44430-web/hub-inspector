@@ -2,6 +2,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { useStore } from '@/lib/store'
 import type { Block, BlockStyle } from '@/lib/types'
+import { LIBRARY } from '@/lib/blocks-library'
 
 // ─── Rendu d'un bloc individuel ───────────────────────────────────────────
 function styleToCSS(s: BlockStyle, extra?: React.CSSProperties): React.CSSProperties {
@@ -213,8 +214,7 @@ export default function Canvas() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     const kind = e.dataTransfer.getData('block-kind')
-    const { LIBRARY } = require('@/lib/blocks-library')
-    const item = LIBRARY.find((l: { kind: string }) => l.kind === kind)
+    const item = LIBRARY.find((l) => l.kind === kind)
     if (!item) return
     const rect = containerRef.current!.getBoundingClientRect()
     const wx = (e.clientX - rect.left - panX) / zoom
