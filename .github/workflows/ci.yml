@@ -1,5 +1,6 @@
 # CI minimale bloquante (session sécu du 02/10/2026) : install, audit npm de
-# production, lint zéro warning, typecheck, build — sur chaque push main et
+# production, lint (erreurs bloquantes, warnings tolérés), typecheck, build —
+# sur chaque push main et
 # chaque pull request.
 #
 # La CI n'a AUCUN secret : le build doit passer sans variables d'env (les env
